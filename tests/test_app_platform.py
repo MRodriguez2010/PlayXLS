@@ -3,6 +3,7 @@ import zipfile
 
 from playxls.app import QtLaunchDecision, choose_qt_platform, main
 from playxls.config import ConfigStore
+from playxls.video import VideoProbeResult
 
 
 def test_choose_qt_platform_keeps_explicit_platform():
@@ -69,3 +70,31 @@ def test_export_diagnostics_writes_zip_without_starting_gui(monkeypatch, tmp_pat
         assert "PlayXLS" in archive.read("diagnose.txt").decode()
         playback_records = [json.loads(line) for line in archive.read("state/playback-diagnostics.jsonl").decode().splitlines()]
         assert playback_records[0]["message"] == "BadWindow"
+
+
+def test_probe_video_cli_reports_success_without_starting_gui(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "playxls.app.probe_video_playback",
+        lambda source: VideoProbeResult(ok=True, source=source, mpv_path="/usr/bin/mpv", returncode=0, message="mpv accepted the source"),
+    )
+
+    result = main(["--probe-video", "/nas/movie.mkv"])
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "Playback probe: OK" in output
+    assert "mpv accepted the source" in output
+
+
+def test_probe_video_cli_reports_failure_without_starting_gui(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "playxls.app.probe_video_playback",
+        lambda source: VideoProbeResult(ok=False, source=source, mpv_path="/usr/bin/mpv", returncode=2, message="No playable streams"),
+    )
+
+    result = main(["--probe-video", "/nas/broken.mkv"])
+
+    assert result == 1
+    output = capsys.readouterr().out
+    assert "Playback probe: FAILED" in output
+    assert "No playable streams" in output

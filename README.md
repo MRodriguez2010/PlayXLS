@@ -19,6 +19,12 @@ To collect dependency output, config files, and playback failure logs without la
 .venv/bin/playxls --export-diagnostics ~/playxls-diagnostics.zip
 ```
 
+To check whether mpv can decode a local video or URL without launching the GUI:
+
+```bash
+.venv/bin/playxls --probe-video ~/Videos/foo.mp4
+```
+
 ## What Works In This Build
 
 - Native title/sidebar/toolbar/stage/transport shell matching the supplied prototype structure.
@@ -37,6 +43,7 @@ To collect dependency output, config files, and playback failure logs without la
 - Static thumbnail mode avoids native thumbnail windows and does not touch the live preview pool during row rebuilds.
 - Drag/drop local video files into the window to add and assign them to empty visible cells.
 - mpv subprocess adapter for local video cells when `mpv` is installed.
+- GUI-free `--probe-video` command to test whether mpv can decode a local file or URL before debugging embedded playback.
 - Embedded mpv cells launch with mpv OSC/OSD/default bindings disabled so local-video controls stay in the app-level transport and do not interfere with hover expansion.
 - mpv subprocess shutdown escalates from quit to terminate to kill so failed local-video loads cannot leave stuck child processes behind.
 - Local-video load failures now surface mpv diagnostics in the cell and toast instead of failing silently.

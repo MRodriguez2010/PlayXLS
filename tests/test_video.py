@@ -2,10 +2,11 @@ from pathlib import Path
 import io
 import json
 import socket
+import subprocess
 import threading
 
 import playxls.video as video_module
-from playxls.video import MpvController, default_mpv_ipc_dir
+from playxls.video import MpvController, default_mpv_ipc_dir, probe_video_playback
 
 
 def test_mpv_controller_uses_supplied_ipc_directory(tmp_path: Path):
@@ -151,6 +152,59 @@ def test_mpv_controller_stop_kills_process_that_ignores_graceful_shutdown(monkey
     assert process.wait_timeouts == [0.5, 0.5, 0.5]
     assert controller.process is None
     assert not controller.ipc_path.exists()
+
+
+def test_probe_video_playback_runs_mpv_without_gui_or_audio(monkeypatch):
+    calls = []
+
+    def fake_run(args, *, capture_output, text, timeout):
+        calls.append({"args": args, "capture_output": capture_output, "text": text, "timeout": timeout})
+        return subprocess.CompletedProcess(args, 0, stdout="loaded\n", stderr="")
+
+    monkeypatch.setattr(video_module, "find_executable", lambda name: "/usr/bin/mpv")
+    monkeypatch.setattr(video_module.subprocess, "run", fake_run)
+
+    result = probe_video_playback("/nas/movie.mkv", timeout=4)
+
+    assert result.ok is True
+    assert result.message == "mpv accepted the source"
+    assert calls == [
+        {
+            "args": [
+                "/usr/bin/mpv",
+                "--no-config",
+                "--msg-level=all=warn",
+                "--force-window=no",
+                "--vo=null",
+                "--ao=null",
+                "--frames=1",
+                "--",
+                "/nas/movie.mkv",
+            ],
+            "capture_output": True,
+            "text": True,
+            "timeout": 4,
+        }
+    ]
+
+
+def test_probe_video_playback_reports_clean_mpv_failure(monkeypatch):
+    def fake_run(args, *, capture_output, text, timeout):
+        return subprocess.CompletedProcess(
+            args,
+            2,
+            stdout="",
+            stderr="No video or audio streams selected.\n(process:1): GLib-GIO-CRITICAL **: ignored\n",
+        )
+
+    monkeypatch.setattr(video_module, "find_executable", lambda name: "/usr/bin/mpv")
+    monkeypatch.setattr(video_module.subprocess, "run", fake_run)
+
+    result = probe_video_playback("/nas/broken.mkv")
+
+    assert result.ok is False
+    assert result.returncode == 2
+    assert result.message == "No video or audio streams selected."
 
 
 def controller_response(tmp_path: Path, response_payload: bytes):

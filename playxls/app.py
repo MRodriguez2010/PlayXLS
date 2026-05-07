@@ -14,6 +14,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from playxls import __version__
 from playxls.config import ConfigStore
 from playxls.runtime import find_executable
+from playxls.video import VideoProbeResult, probe_video_playback
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ZIP",
         help="Write a PlayXLS diagnostics zip and exit. Defaults to the PlayXLS state directory.",
     )
+    parser.add_argument("--probe-video", metavar="SOURCE", help="Probe a local video or URL with mpv without launching the GUI.")
     parser.add_argument("--version", action="version", version=f"PlayXLS {__version__}")
     return parser
 
@@ -49,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
         bundle = export_diagnostics(store, output)
         print(f"Diagnostics exported: {bundle}")
         return 0
+    if args.probe_video:
+        result = probe_video_playback(args.probe_video)
+        print(format_video_probe_result(result))
+        return 0 if result.ok else 1
 
     decision = choose_qt_platform(os.environ)
     if not decision.ok:
@@ -175,6 +181,20 @@ def export_diagnostics(store: ConfigStore, output_path: Path | None = None) -> P
             if path.exists() and path.is_file():
                 archive.write(path, archive_name)
     return target
+
+
+def format_video_probe_result(result: VideoProbeResult) -> str:
+    status = "OK" if result.ok else "FAILED"
+    lines = [
+        f"Playback probe: {status}",
+        f"source: {result.source}",
+        f"mpv: {result.mpv_path or 'missing'}",
+    ]
+    if result.returncode is not None:
+        lines.append(f"exit_code: {result.returncode}")
+    if result.message:
+        lines.append(result.message)
+    return "\n".join(lines)
 
 
 def _default_diagnostics_bundle_path(store: ConfigStore) -> Path:

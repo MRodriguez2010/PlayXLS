@@ -6,11 +6,21 @@ import socket
 import subprocess
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
 from playxls.runtime import find_executable
 from playxls.transport import TransportSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class VideoProbeResult:
+    ok: bool
+    source: str
+    mpv_path: str
+    returncode: int | None
+    message: str
 
 
 class MpvController:
@@ -242,6 +252,36 @@ def resolve_stream_url(url: str) -> str:
     return url
 
 
+def probe_video_playback(source: str, *, timeout: float = 12) -> VideoProbeResult:
+    mpv_path = find_executable("mpv")
+    if not mpv_path:
+        return VideoProbeResult(False, source, "", None, "mpv executable not found")
+    args = build_mpv_probe_args(mpv_path, source)
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        message = _clean_probe_output(_timeout_output(exc)) or f"Timed out after {timeout:g}s"
+        return VideoProbeResult(False, source, mpv_path, None, message)
+    message = _clean_probe_output(f"{result.stdout}\n{result.stderr}")
+    if result.returncode == 0:
+        return VideoProbeResult(True, source, mpv_path, result.returncode, "mpv accepted the source")
+    return VideoProbeResult(False, source, mpv_path, result.returncode, message or f"mpv exited with code {result.returncode}")
+
+
+def build_mpv_probe_args(mpv_path: str, source: str) -> list[str]:
+    return [
+        mpv_path,
+        "--no-config",
+        "--msg-level=all=warn",
+        "--force-window=no",
+        "--vo=null",
+        "--ao=null",
+        "--frames=1",
+        "--",
+        source,
+    ]
+
+
 def build_mpv_args(
     mpv_path: str,
     source: str,
@@ -303,3 +343,22 @@ def _is_noisy_output_line(line: str) -> bool:
     if line.startswith("[ipc_") and "Write error" in line:
         return True
     return "GLib-GIO-CRITICAL" in line
+
+
+def _clean_probe_output(output: str) -> str:
+    lines = []
+    for line in output.splitlines():
+        line = line.strip()
+        if line and not _is_noisy_output_line(line):
+            lines.append(line)
+    return "\n".join(lines[-6:])
+
+
+def _timeout_output(exc: subprocess.TimeoutExpired) -> str:
+    parts = []
+    for value in (exc.stdout, exc.stderr):
+        if isinstance(value, bytes):
+            parts.append(value.decode("utf-8", errors="replace"))
+        elif value:
+            parts.append(str(value))
+    return "\n".join(parts)
