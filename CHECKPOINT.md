@@ -12,7 +12,94 @@ cd /home/ai-agents/Projects/PlayXLS
 .venv/bin/playxls
 ```
 
-The latest slice changed embedded browser profiles from per-cell-only to shared-by-default. Browser cells now use one reused `QWebEngineProfile` object backed by `~/.cache/playxls/browser/shared/{storage,cache}` unless the user switches Advanced settings to per-cell isolation, which uses `~/.cache/playxls/browser/cell-N/{storage,cache}`.
+The latest slice added preview/library performance certification, persisted Sources/stage splitter sizing, custom-layout delete affordances, browser source-list compatibility notices, richer QtWebEngine load-failure messages, cached watched-folder startup loading, the large-NAS startup fix, the XCB launch preference for embedded mpv playback, Pluto playback-limited warnings, repeat/shuffle auto-advance for finished local videos, and visible mpv load-failure diagnostics for local video cells.
+
+## Latest MPV Diagnostics
+
+Local-video assignment no longer treats creation of the mpv IPC socket as proof that playback loaded. `MpvController` now captures mpv's combined stdout/stderr tail, keeps loader diagnostics available with `--msg-level=all=warn`, and waits for actual loaded media state (`path` or `duration`) before reporting success. If mpv reaches idle after a loader error, PlayXLS treats that as a failed load and stores a cleaned `last_error` instead of leaving the cell in a broken-looking playback state.
+
+Failed video cells now show `Playback failed` plus the mpv diagnostic inside the cell surface, emit `video_load_failed` through `CellWidget` and `GridStage`, and raise a toast from `MainWindow` with the affected cell number. Noisy shutdown lines such as mpv IPC write errors and GLib/GIO cleanup warnings are filtered out of the user-facing diagnostic.
+
+Validation included a valid local-file smoke and an invalid-source smoke. The valid file loaded with a detected duration of about `21.48s`; the invalid source failed cleanly with mpv's unsupported-protocol diagnostic instead of appearing to load.
+
+## Latest Performance Certification
+
+Repeated preview hover certification used an off-screen XCB Qt harness with 15 temporary symlinked stock-video rows, real `MpvController` instances, and `PreviewPool(max_size=5)`. Results: 15 preview starts created 15 controllers over time, but the pool kept `max_pool_sources=5` and `max_alive_processes=5`; after `stop_all()`, `alive_after_stop=0`. Total elapsed was `11.300s`, average iteration `0.520s`, max iteration `0.692s`, and process RSS delta was about `3.8 MB`.
+
+Large-library certification used the active 5,923-video cached NAS index in static thumbnail mode. `build_state()` loaded the cache in `1.180s`; initial library render took `0.501s`; repeated search/show-more rebuilds kept `max_rows=400` for the exercised flow and `max_native_thumbs=0`. A harness run exposed that static thumbnail rows were still calling `preview_pool.pause()` on destruction; `VideoRow._stop_preview()` now only calls pause in `preview_mode == "lazy"`, dropping static-mode pause calls from `4600` to `0` in the same stress flow.
+
+## Latest Splitter Persistence
+
+The main Sources/stage splitter now persists through the existing session file. `SessionState` and `AppState` carry `main_splitter_sizes`; `MainWindow` restores those sizes during shell construction and captures the current `QSplitter.sizes()` whenever `_save_session()` runs. Old sessions without splitter data still fall back to the existing `[320, 960]` default, and invalid saved sizes are ignored.
+
+## Latest NAS Playback Fix
+
+User reported that browser playback from YouTube worked, but assigning a NAS watched-folder video never played and then caused UI flicker. Direct mpv probing showed the NAS file was readable and playable when mpv was not embedded. A Qt Wayland embed probe reproduced the real failure: passing a Qt Wayland native window id to mpv's current `--wid` subprocess backend made mpv exit with `BadWindow` before playback.
+
+Fix: `choose_qt_platform()` now prefers Qt's `xcb` backend whenever a `DISPLAY` is available and `libxcb-cursor0` is installed, including on Wayland desktops with XWayland. Explicit `QT_QPA_PLATFORM` still wins. This keeps the current subprocess-mpv backend on the X11/XWayland surface model it requires until the project moves to direct libmpv or another native backend.
+
+Validation: a temporary XCB PlayXLS smoke assigned one cached NAS video to a 1x1 grid. mpv stayed alive, exposed an IPC socket, and transport snapshots advanced from about `0.06s` to `1.89s` with a detected duration of about `473s`.
+
+## Latest Pluto Browser Notice
+
+Pluto.tv can render and allow sign-in inside QtWebEngine, but the playback path reported `Player:2 ErrorNotSupported` / `No playable format` from site JavaScript. `browser_compatibility_notice()` now flags `pluto.tv` with `Playback limited`, which appears in both the Sources browser list and the active browser toolbar next to the existing system-browser handoff.
+
+## Latest Layout Management
+
+The layout menu now includes a `Delete Custom Layout` submenu when saved custom layouts exist. Delete actions are only generated for `LayoutDefinition.custom == True`, so built-in presets are protected. Deleting a non-current custom layout removes it from memory and rewrites `layouts.toml` with the remaining custom layouts. Deleting the active custom layout falls back to the first built-in preset, saves the session, persists the remaining custom layouts, and refreshes the UI.
+
+## Latest Browser Hardening
+
+DRM-limited service notices now appear in the Sources browser list as well as the active browser toolbar. `BrowserRow` uses the same pure `playxls.browser.browser_compatibility_notice()` classifier as the toolbar, so Netflix, Disney+, Prime Video, Max, and HBO Max show `DRM limited` before the source is assigned to a cell.
+
+QtWebEngine load failures now use `QWebEnginePage.loadingChanged` details when available. `playxls.browser.browser_load_failure_message()` formats Qt error strings/codes such as `net::ERR_NAME_NOT_RESOLVED (-105)` and falls back to the failed host. `CellWidget` keeps the richer `loadingChanged` failure from being overwritten by a later generic `loadFinished(False)`, while preserving `loadFinished(False)` as a fallback for builds or cases without detailed loading info.
+
+Toolbar failure notices still take priority over generic DRM warnings and still point users to the system-browser handoff.
+
+Live QtWebEngine validation loaded YouTube, Twitch, Netflix, Prime Video, Disney+, and Max successfully through the PlayXLS `CellWidget` path. Final URLs/titles were captured, including Prime Video's non-prime redirect and Max's redirect to `hbomax.com`; no load failures were emitted for the landing pages. This does not validate login or protected playback.
+
+## Latest Cached Startup Fix
+
+Startup no longer walks every configured watched folder before the window appears. `ConfigStore` now persists a watched-library index at `~/.cache/playxls/library_index.toml`, and `build_state()` loads videos from that cache instead of calling `scan_folder()` on startup.
+
+The folder scanner now supports:
+
+- a seeded `seen_paths` set so startup can avoid synchronous priming;
+- one-batch refresh callbacks instead of thousands of per-file UI updates;
+- a 1-second initial background delay followed by 30-second polling.
+
+`MainWindow._folder_scan_refreshed()` applies scanner batches on the Qt thread, updates folder counts, filters ignored videos, clears cells for removed files, saves the refreshed cache only when the scan result changed, and syncs the library UI once. If a refresh returns the same paths and counts, it returns before cache rewriting or UI resync.
+
+The current NAS cache was seeded once during this session:
+
+```text
+cached=5923 folders=[('01_Main Collection', 4336), ('Taboos', 1587)]
+```
+
+After that, `build_state()` loaded the 5,923 cached videos in `0:01.34`, and the Qt Wayland smoke loaded the cached library, rendered 200 rows, created 0 native thumbnail windows, and exited in `0:02.65`. A timed launch that allowed the background refresh to complete saw one refresh at about `8.88s`; after the no-op optimization, the unchanged refresh callback took `0.002s` and the max 100 ms event-loop tick gap was `0.106s`.
+
+## Latest NAS Library Fix
+
+User added two SMB/GVfs watched folders on a NAS with 5,923 discovered video files, after which PlayXLS froze on startup and sometimes aborted with:
+
+```text
+The Wayland connection experienced a fatal error: Too many references: cannot splice
+```
+
+Root cause: startup scanned the NAS folders, then the Sources library eagerly created one `VideoRow` and one native thumbnail window per discovered video. With thousands of rows, that put heavy pressure on Wayland/native child window resources before a file could even be played. The app also synchronously primed the folder watcher after the startup scan, duplicating an expensive NAS walk.
+
+Fix:
+
+- Library rendering now starts with the first 200 matching rows and adds a `Show N more` action for incremental expansion.
+- Static thumbnail mode no longer marks every row thumbnail as a native window. Native thumbnail windows are only created for live lazy previews.
+- Folder scanner startup can be seeded with already loaded library paths, so `MainWindow` skips the duplicate synchronous prime after `build_state()`.
+- The fallback folder scanner interval is now 30 seconds instead of 5 seconds, reducing repeated NAS polling pressure.
+
+The first fix smoke against the user's active config loaded 5,923 videos, rendered 200 rows, created 0 native thumbnail windows in `thumb` mode, and exited cleanly via timed auto-quit.
+
+## Latest Browser Profile Fix
+
+The previous slice changed embedded browser profiles from per-cell-only to shared-by-default. Browser cells now use one reused `QWebEngineProfile` object backed by `~/.cache/playxls/browser/shared/{storage,cache}` unless the user switches Advanced settings to per-cell isolation, which uses `~/.cache/playxls/browser/cell-N/{storage,cache}`.
 
 ## Latest Browser Fix
 
@@ -27,15 +114,15 @@ Fix:
 - Add a normal app-level browser toolbar above the stage. It targets the active/hovered browser cell and owns back, forward, reload, and URL navigation.
 - Keep browser web views as manually positioned direct children so they are not layout-managed with unrelated chrome.
 
-## Latest Browser Hardening
+## Earlier Browser Hardening
 
-The app-level browser toolbar now shows a short `DRM limited` compatibility notice when the active browser cell points at known protected-video services such as Netflix, Disney+, Prime Video, Max, or HBO Max. The notice is intentionally outside the QtWebEngine cell surface so it avoids the same X11 stacking problem that affected in-cell controls.
+The app-level browser toolbar shows a short `DRM limited` compatibility notice when the active browser cell points at known protected-video services such as Netflix, Disney+, Prime Video, Max, or HBO Max. The notice is intentionally outside the QtWebEngine cell surface so it avoids the same X11 stacking problem that affected in-cell controls.
 
 The classifier is pure URL-based behavior in `playxls.browser.browser_compatibility_notice`, so future service-specific handling can be tested without constructing Qt widgets.
 
 The same toolbar now includes an external-open handoff button for the active browser cell. It opens the assigned/current URL through `QDesktopServices.openUrl`, with the callable kept injectable as `MainWindow.open_external_url` for tests. This gives DRM-limited services and login-hostile embedded flows a clear system-browser escape path.
 
-QtWebEngine load failures now flow from `CellWidget` to `GridStage` to `MainWindow`. When the active browser cell reports `loadFinished(False)`, the toolbar shows `Load failed` with a tooltip pointing users to the system-browser handoff. A later successful load clears the failure state, and failure notices take priority over generic DRM-limited notices.
+QtWebEngine load failures flow from `CellWidget` to `GridStage` to `MainWindow`. A later successful load clears the failure state, and failure notices take priority over generic DRM-limited notices.
 
 ## Latest Transport Hardening
 
@@ -49,7 +136,7 @@ The app-level transport now includes repeat and shuffle controls with persisted 
 - `repeat folder`
 - `shuffle off/on`
 
-`repeat 1` also pushes `loop-file=inf` to running local mpv instances; other repeat/shuffle modes are now represented in state/UI and are ready for the next queue/folder auto-advance slice.
+`repeat 1` pushes `loop-file=inf` to running local mpv instances. `repeat all`, `repeat folder`, and shuffle now auto-advance when mpv reports `eof-reached`; the next-video selection lives in pure `playxls.queueing.next_video_for_repeat()` and is covered independently from the Qt transport wiring.
 
 User manually confirmed that shared browser login persists across cells, and browser-video fullscreen is correctly confined to the cell.
 
@@ -64,8 +151,8 @@ Fix: after normal layout positioning, `GridStage.reposition()` now raises the ho
 Latest full verification:
 
 ```bash
+QT_QPA_PLATFORM=offscreen QTWEBENGINE_DISABLE_SANDBOX=1 PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest -q tests/test_video.py tests/test_playback_state.py tests/test_browser_cell.py tests/test_main_window_transport.py
 QT_QPA_PLATFORM=offscreen QTWEBENGINE_DISABLE_SANDBOX=1 PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest -q -p no:cacheprovider
-QT_QPA_PLATFORM=offscreen QTWEBENGINE_DISABLE_SANDBOX=1 PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest -q tests/test_browser.py tests/test_browser_cell.py tests/test_config.py tests/test_settings_dialog.py tests/test_main_window_transport.py
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - <<'PY'
 from pathlib import Path
 files = sorted(Path('playxls').rglob('*.py'))
@@ -78,17 +165,24 @@ PY
 
 Results:
 
-- Grid/browser/main-window focused tests: `30 passed in 2.21s`
-- Full suite: `81 passed in 3.14s`
-- `compiled 21 Python source files`
-- Diagnostics found `/snap/bin/mpv`, PySide6, and QtWebEngine.
+- Focused diagnostics/playback/browser transport tests: `53 passed in 2.72s`
+- Full suite: `118 passed in 5.22s`
+- `compiled 22 Python source files`
+- Diagnostics found `/snap/bin/mpv`, PySide6, QtWebEngine, `libxcb-cursor.so.0`, and now selects Qt platform `xcb`.
+- Valid local-file smoke: `MpvController.load()` returned true, kept `last_error=''`, and detected a `21.48s` duration.
+- Invalid-source smoke: `MpvController.load()` returned false with a cleaned unsupported-protocol mpv diagnostic.
+- Cached `build_state()` smoke: `videos=5923 folders=[('01_Main Collection', 4336), ('Taboos', 1587)]`, elapsed `0:01.34`.
+- Cached Wayland startup smoke: `videos=5923 rendered_rows=200 native_thumbs=0 scanner_delay=1.0`, elapsed `0:02.65`.
+- Cached NAS playback XCB smoke: mpv process remained alive, IPC existed, and position advanced from about `0.06s` to `1.89s` with duration about `473s`.
+- Background refresh timing smoke: `callback_durations=[0.002]`, `max_tick_gap=0.106`.
+- Live PlayXLS browser-cell landing-page validation: YouTube, Twitch, Netflix, Prime Video, Disney+, and Max all emitted successful page loads with no failure notices.
 - X11 screenshot validation saved `/tmp/playxls-browser-grid.png`, `/tmp/playxls-browser-drm-notice.png`, and `/tmp/playxls-browser-external-button.png`; the app-level toolbar was visible, selected browser cells rendered, and the `DRM limited` notice plus external-open button fit without crowding the URL field.
 - Transport screenshot validation saved `/tmp/playxls-transport-repeat-shuffle.png`; repeat/shuffle controls fit at `960x620`.
 - Hover stack screenshot saved `/tmp/playxls-hover-stack.png`; expanded Cell 1 rendered above overlapping cells.
 
 ## Next Steps
 
-1. Run full test suite after any follow-up edits.
-2. Implement queue/folder auto-advance semantics for repeat all, repeat folder, and shuffle.
-3. Decide whether browser limitation notices should also appear in the Sources browser list, not only the active toolbar.
-4. Capture richer site-specific QtWebEngine failure details if Qt exposes useful error codes beyond `loadFinished(False)`.
+1. Run full test suite after any follow-up code edits.
+2. Continue interactive site-by-site validation for login, fullscreen, and protected playback where credentials/playback access are available.
+3. Decide whether the next backend milestone is hardening the subprocess-mpv adapter or beginning the direct libmpv migration.
+4. Consider persisting mpv diagnostic tails to a debug log if user reports continue to require post-crash evidence.

@@ -19,9 +19,13 @@ from PySide6.QtWidgets import (
 )
 
 from playxls.models import AppSettings, BrowserPreset, CellContent, FolderEntry, VideoItem
+from playxls.browser import browser_compatibility_notice
 from playxls.preview import PreviewPool
 from playxls.theme import Theme
 from playxls.ui.widgets import MonoLabel, SegmentedControl, action_button, clear_layout, make_section_label
+
+
+LIBRARY_PAGE_SIZE = 200
 
 
 class SourcesPanel(QFrame):
@@ -123,12 +127,14 @@ class LibraryTab(QWidget):
         self.cell_content: list[CellContent] = []
         self.cell_count = 1
         self.folder_filter = "all"
+        self.visible_limit = LIBRARY_PAGE_SIZE
+        self.show_more_button: QPushButton | None = None
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 8, 0, 0)
         root.setSpacing(8)
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search library")
-        self.search.textChanged.connect(self._rebuild)
+        self.search.textChanged.connect(self._search_changed)
         root.addWidget(self.search)
         self.filter_row = QFrame()
         self.filter_layout = QHBoxLayout(self.filter_row)
@@ -160,7 +166,10 @@ class LibraryTab(QWidget):
             self.preview_pool.configure(self.settings.preview_cache_size)
         self._rebuild_filters()
         clear_layout(self.body_layout)
-        for video in filter_videos(self.videos, self.search.text(), self.folder_filter):
+        self.show_more_button = None
+        filtered = filter_videos(self.videos, self.search.text(), self.folder_filter)
+        visible = filtered[: self.visible_limit]
+        for video in visible:
             self.body_layout.addWidget(
                 VideoRow(
                     self.theme,
@@ -175,6 +184,13 @@ class LibraryTab(QWidget):
                     preview_muted=self.settings.preview_mute,
                 )
             )
+        remaining = len(filtered) - len(visible)
+        if remaining > 0:
+            count = min(LIBRARY_PAGE_SIZE, remaining)
+            self.show_more_button = QPushButton(f"Show {count} more")
+            self.show_more_button.setToolTip(f"{len(visible)} of {len(filtered)} videos shown")
+            self.show_more_button.clicked.connect(self._show_more)
+            self.body_layout.addWidget(self.show_more_button)
         self.body_layout.addStretch(1)
 
     def _rebuild_filters(self) -> None:
@@ -193,6 +209,15 @@ class LibraryTab(QWidget):
 
     def _set_folder_filter(self, folder: str) -> None:
         self.folder_filter = folder
+        self.visible_limit = LIBRARY_PAGE_SIZE
+        self._rebuild()
+
+    def _search_changed(self) -> None:
+        self.visible_limit = LIBRARY_PAGE_SIZE
+        self._rebuild()
+
+    def _show_more(self) -> None:
+        self.visible_limit += LIBRARY_PAGE_SIZE
         self._rebuild()
 
 
@@ -228,8 +253,9 @@ class VideoRow(QFrame):
         row = QHBoxLayout()
         self.thumb = QFrame()
         self.thumb.setFixedSize(48, 32)
-        self.thumb.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
-        self.thumb.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
+        if preview_mode == "lazy":
+            self.thumb.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+            self.thumb.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
         self.thumb.setStyleSheet(f"background:{theme.cell_bg};border-radius:4px;")
         thumb_layout = QVBoxLayout(self.thumb)
         thumb_layout.setContentsMargins(0, 0, 0, 0)
@@ -284,7 +310,7 @@ class VideoRow(QFrame):
 
     def _stop_preview(self) -> None:
         self.preview_timer.stop()
-        if self.preview_pool and self.preview_source:
+        if self.preview_mode == "lazy" and self.preview_pool and self.preview_source:
             self.preview_pool.pause(self.preview_source)
         self.thumb_label.setVisible(True)
 
@@ -411,9 +437,11 @@ class BrowserTab(QWidget):
 class BrowserRow(QFrame):
     def __init__(self, theme: Theme, preset: BrowserPreset, cell_content: list[CellContent], cell_count: int, assign, remove) -> None:
         super().__init__()
+        self.compatibility_notice = QLabel("")
         self.setStyleSheet(f"QFrame{{background:{theme.surface2};border:1px solid {theme.border};border-radius:6px;}}")
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
         head = QHBoxLayout()
         tile = QLabel(preset.name[:2].upper())
         tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -427,6 +455,14 @@ class BrowserRow(QFrame):
         remove_button.clicked.connect(lambda: remove(preset.id))
         head.addWidget(remove_button)
         root.addLayout(head)
+        notice = browser_compatibility_notice(preset.url)
+        if notice:
+            self.compatibility_notice.setText(notice.label)
+            self.compatibility_notice.setToolTip(notice.detail)
+            self.compatibility_notice.setStyleSheet(f'font-family:"JetBrains Mono";font-size:10px;color:{theme.danger};background:transparent;')
+            root.addWidget(self.compatibility_notice)
+        else:
+            self.compatibility_notice.hide()
         root.addWidget(cell_picker(cell_count, lambda index: assign(preset, index), theme))
 
 

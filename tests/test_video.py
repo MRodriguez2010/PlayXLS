@@ -1,4 +1,5 @@
 from pathlib import Path
+import io
 import json
 import socket
 import threading
@@ -52,6 +53,88 @@ def test_embedded_mpv_args_disable_per_cell_ui(tmp_path: Path):
     assert "--osd-level=0" in args
     assert "--input-default-bindings=no" in args
     assert "--wid=123" in args
+
+
+def test_embedded_mpv_args_keep_loader_output_available_for_diagnostics(tmp_path: Path):
+    args = video_module.build_mpv_args(
+        "mpv",
+        "broken://movie",
+        ipc_path=tmp_path / "mpv.sock",
+        window_id=123,
+        paused=False,
+        loop=False,
+        volume=60,
+    )
+
+    assert "--no-terminal" not in args
+    assert "--msg-level=all=warn" in args
+
+
+def test_mpv_controller_captures_output_when_load_exits_before_ipc(monkeypatch, tmp_path: Path):
+    popen_calls = []
+
+    class FailedProcess:
+        def __init__(self, args, stdout=None, stderr=None, text=None) -> None:
+            popen_calls.append({"args": args, "stdout": stdout, "stderr": stderr, "text": text})
+            self.stdout = io.StringIO("No protocol handler found\nExiting... (Errors when loading file)\n")
+
+        def poll(self):
+            return 2
+
+        def wait(self, timeout=None):
+            return 2
+
+        def terminate(self):
+            return None
+
+    monkeypatch.setattr(video_module, "find_executable", lambda name: "/usr/bin/mpv")
+    monkeypatch.setattr(video_module.subprocess, "Popen", FailedProcess)
+    controller = MpvController(ipc_dir=tmp_path)
+
+    loaded = controller.load("broken://video")
+
+    assert loaded is False
+    assert popen_calls[0]["stdout"] == video_module.subprocess.PIPE
+    assert popen_calls[0]["stderr"] == video_module.subprocess.STDOUT
+    assert "No protocol handler found" in controller.last_error
+
+
+def test_mpv_controller_treats_idle_after_loader_error_as_load_failure(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(video_module, "find_executable", lambda name: "/usr/bin/mpv")
+    controller = MpvController(ipc_dir=tmp_path)
+    controller.process = _RunningProcess()
+    controller.ipc_path.touch()
+    controller._output_tail = ["No protocol handler found to open URL broken://video"]
+
+    def fake_request(command):
+        if command == ["get_property", "idle-active"]:
+            return {"error": "success", "data": True}
+        return {"error": "property unavailable"}
+
+    controller.request = fake_request
+
+    assert controller._wait_for_socket() is False
+    assert "No protocol handler found" in controller.last_error
+
+
+def test_mpv_controller_filters_noisy_ipc_output_from_diagnostics(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(video_module, "find_executable", lambda name: "/usr/bin/mpv")
+    controller = MpvController(ipc_dir=tmp_path)
+    controller.process = _RunningProcess()
+    controller.ipc_path.touch()
+    controller._record_output_line("No protocol handler found")
+    controller._record_output_line("[ipc_0] Write error (Broken pipe)")
+    controller._record_output_line("(process:1): GLib-GIO-CRITICAL **: g_dbus_connection_emit_signal failed")
+
+    def fake_request(command):
+        if command == ["get_property", "idle-active"]:
+            return {"error": "success", "data": True}
+        return {"error": "property unavailable"}
+
+    controller.request = fake_request
+
+    assert controller._wait_for_socket() is False
+    assert controller.last_error == "No protocol handler found"
 
 
 def controller_response(tmp_path: Path, response_payload: bytes):

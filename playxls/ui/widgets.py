@@ -25,6 +25,7 @@ def clear_layout(layout: QHBoxLayout | QVBoxLayout) -> None:
         widget = item.widget()
         child_layout = item.layout()
         if widget:
+            widget.setParent(None)
             widget.deleteLater()
         if child_layout:
             clear_layout(child_layout)

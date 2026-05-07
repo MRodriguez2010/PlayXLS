@@ -9,7 +9,7 @@ from typing import Any
 import tomli_w
 
 from playxls.layout import LayoutDefinition, layout_from_dict, layout_to_dict
-from playxls.models import AppSettings, BrowserPreset, DEFAULT_BROWSER_PRESETS, DEFAULT_FOLDERS, DEFAULT_KEYBINDINGS, FolderEntry, KeyBinding, SessionState
+from playxls.models import AppSettings, BrowserPreset, DEFAULT_BROWSER_PRESETS, DEFAULT_FOLDERS, DEFAULT_KEYBINDINGS, FolderEntry, KeyBinding, SessionState, VideoItem
 
 
 class ConfigStore:
@@ -44,6 +44,10 @@ class ConfigStore:
     @property
     def ignored_videos_path(self) -> Path:
         return self.config_dir / "ignored_videos.toml"
+
+    @property
+    def library_index_path(self) -> Path:
+        return self.cache_dir / "library_index.toml"
 
     @property
     def session_path(self) -> Path:
@@ -134,6 +138,20 @@ class ConfigStore:
     def save_ignored_video_paths(self, paths: set[str]) -> None:
         self._write_toml(self.ignored_videos_path, {"paths": sorted(paths)})
 
+    def load_library_index(self) -> list[VideoItem]:
+        data = self._read_toml(self.library_index_path)
+        videos: list[VideoItem] = []
+        for item in data.get("videos", []):
+            if not isinstance(item, dict):
+                continue
+            video = _video_from_dict(item)
+            if video.path or video.src:
+                videos.append(video)
+        return videos
+
+    def save_library_index(self, videos: list[VideoItem]) -> None:
+        self._write_toml(self.library_index_path, {"videos": [_video_to_dict(video) for video in videos]})
+
     def load_session(self) -> SessionState:
         data = self._read_toml(self.session_path)
         return SessionState.from_dict(data.get("session", data))
@@ -155,3 +173,25 @@ class ConfigStore:
         self.ensure_dirs()
         with path.open("wb") as handle:
             tomli_w.dump(data, handle)
+
+
+def _video_from_dict(data: dict[str, Any]) -> VideoItem:
+    return VideoItem(
+        id=str(data.get("id", "")),
+        title=str(data.get("title", "")),
+        duration=str(data.get("duration", "--:--")),
+        folder=str(data.get("folder", "Local")),
+        path=str(data.get("path", "")),
+        src=str(data.get("src", "")),
+    )
+
+
+def _video_to_dict(video: VideoItem) -> dict[str, Any]:
+    return {
+        "id": video.id,
+        "title": video.title,
+        "duration": video.duration,
+        "folder": video.folder,
+        "path": video.path,
+        "src": video.src,
+    }

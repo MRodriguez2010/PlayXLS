@@ -18,3 +18,13 @@ def test_app_state_applies_saved_session_and_preserves_capacity():
     assert len(state.cell_content) >= 20
     assert state.master_volume == 0.3
     assert state.muted is True
+
+
+def test_app_state_preserves_main_splitter_sizes_through_session():
+    state = AppState()
+    session = SessionState(main_splitter_sizes=[260, 1020])
+
+    state.apply_session(session)
+
+    assert state.main_splitter_sizes == [260, 1020]
+    assert state.to_session().main_splitter_sizes == [260, 1020]

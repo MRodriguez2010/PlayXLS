@@ -8,18 +8,19 @@ from PySide6.QtWidgets import QApplication, QFrame, QLabel, QMenu, QPushButton, 
 from shiboken6 import delete as delete_qobject, isValid as is_valid_qobject
 
 from playxls.layout import CellRect, LayoutDefinition, collect_cells
-from playxls.browser import BrowserFullscreenBridge, browser_profile_paths, normalize_browser_url
+from playxls.browser import BrowserFullscreenBridge, browser_load_failure_message, browser_profile_paths, normalize_browser_url
 from playxls.models import AppSettings, CellContent, VideoItem
 from playxls.theme import Theme
 from playxls.ui.widgets import MonoLabel, animate_geometry
 from playxls.video import MpvController
 
 try:
-    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+    from PySide6.QtWebEngineCore import QWebEngineLoadingInfo, QWebEnginePage, QWebEngineProfile
     from PySide6.QtWebEngineWidgets import QWebEngineView
 except ImportError:  # pragma: no cover - depends on optional QtWebEngine wheel.
     QWebEnginePage = None
     QWebEngineProfile = None
+    QWebEngineLoadingInfo = None
     QWebEngineView = None
 
 
@@ -33,6 +34,7 @@ class GridStage(QFrame):
     browser_url_changed = Signal(int, str)
     browser_load_failed = Signal(int, str)
     browser_load_succeeded = Signal(int)
+    video_load_failed = Signal(int, str)
 
     def __init__(self, theme: Theme, cache_dir: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -84,6 +86,7 @@ class GridStage(QFrame):
             cell.browser_url_changed.connect(self.browser_url_changed.emit)
             cell.browser_load_failed.connect(self.browser_load_failed.emit)
             cell.browser_load_succeeded.connect(self.browser_load_succeeded.emit)
+            cell.video_load_failed.connect(self.video_load_failed.emit)
             self.cells.append(cell)
         for index, cell in enumerate(self.cells):
             cell.setVisible(index < len(rects))
@@ -214,6 +217,7 @@ class CellWidget(QFrame):
     browser_url_changed = Signal(int, str)
     browser_load_failed = Signal(int, str)
     browser_load_succeeded = Signal(int)
+    video_load_failed = Signal(int, str)
     mpv_factory = MpvController
 
     def __init__(self, index: int, theme: Theme, cache_dir: Path, parent: QWidget | None = None) -> None:
@@ -231,6 +235,7 @@ class CellWidget(QFrame):
         self.browser_page = None
         self.browser_placeholder: QLabel | None = None
         self.browser_page_fullscreen = False
+        self.browser_failed_from_loading_info = False
         self.is_fullscreen = False
         self.browser_fullscreen_bridge = BrowserFullscreenBridge(self._browser_fullscreen_requested)
         self.setMouseTracking(True)
@@ -354,16 +359,23 @@ class CellWidget(QFrame):
         source_key = video.path or video.src
         self.mpv = type(self).mpv_factory(window_id=int(surface.winId()))
         if source and self.mpv.available:
-            self.mpv.load(source, paused=False, loop=False, volume=60)
+            loaded = self.mpv.load(source, paused=False, loop=False, volume=60)
+            if not loaded:
+                message = _mpv_error_message(self.mpv)
+                self.mpv.stop()
+                self.mpv = None
+                _add_video_status_label(surface, f"Playback failed\n{message}", self.theme)
+                self.video_load_failed.emit(self.index, message)
+                self.overlay.setText(f"{video.title}\n{video.folder} · {video.duration}")
+                return
             if settings.save_playback_position:
                 resume_position = playback_positions.get(source_key, 0.0)
                 if resume_position > 1:
                     self.mpv.seek_absolute(resume_position)
         else:
-            label = QLabel("mpv unavailable\n" + source)
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet(f"background:#000;color:{self.theme.text_secondary};")
-            QVBoxLayout(surface).addWidget(label)
+            message = "mpv unavailable" if source else "No video source"
+            _add_video_status_label(surface, f"{message}\n{source}", self.theme)
+            self.video_load_failed.emit(self.index, message)
         self.overlay.setText(f"{video.title}\n{video.folder} · {video.duration}")
 
     def _set_browser(self, content: CellContent, settings: AppSettings) -> None:
@@ -379,6 +391,7 @@ class CellWidget(QFrame):
             page.settings().setAttribute(page.settings().WebAttribute.FullScreenSupportEnabled, True)
             page.fullScreenRequested.connect(self.browser_fullscreen_bridge.handle)
             page.urlChanged.connect(lambda url: self.browser_url_changed.emit(self.index, url.toString()))
+            page.loadingChanged.connect(self._browser_loading_changed)
             view.loadFinished.connect(self._browser_load_finished)
             view.setUrl(QUrl(normalize_browser_url(content.url)))
             view.show()
@@ -435,6 +448,7 @@ class CellWidget(QFrame):
             delete_qobject(self.browser_profile)
         self.browser_profile = None
         self.browser_profile_owned = False
+        self.browser_failed_from_loading_info = False
         while self.root.count():
             item = self.root.takeAt(0)
             widget = item.widget()
@@ -463,6 +477,28 @@ class CellWidget(QFrame):
 
     def _browser_load_finished(self, ok: bool) -> None:
         if ok:
+            self.browser_failed_from_loading_info = False
             self.browser_load_succeeded.emit(self.index)
             return
+        if self.browser_failed_from_loading_info:
+            return
         self.browser_load_failed.emit(self.index, "Load failed")
+
+    def _browser_loading_changed(self, info) -> None:
+        if QWebEngineLoadingInfo is not None and info.status() != QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus:
+            return
+        self.browser_failed_from_loading_info = True
+        self.browser_load_failed.emit(self.index, browser_load_failure_message(info))
+
+
+def _mpv_error_message(mpv) -> str:
+    message = str(getattr(mpv, "last_error", "") or "").strip()
+    return message or "mpv failed to start playback"
+
+
+def _add_video_status_label(surface: QWidget, message: str, theme: Theme) -> None:
+    label = QLabel(message)
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    label.setWordWrap(True)
+    label.setStyleSheet(f"background:#000;color:{theme.text_secondary};padding:12px;")
+    QVBoxLayout(surface).addWidget(label)

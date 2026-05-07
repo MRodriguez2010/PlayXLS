@@ -79,9 +79,6 @@ def choose_qt_platform(
         return QtLaunchDecision(True, explicit)
 
     wayland_available = bool(env.get("WAYLAND_DISPLAY")) and bool(find_library("wayland-client"))
-    if env.get("XDG_SESSION_TYPE", "").casefold() == "wayland" and wayland_available:
-        return QtLaunchDecision(True, "wayland")
-
     if env.get("DISPLAY"):
         if find_library("xcb-cursor"):
             return QtLaunchDecision(True, "xcb")

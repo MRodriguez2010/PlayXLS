@@ -48,6 +48,33 @@ def test_video_cell_resumes_saved_position_when_setting_enabled(tmp_path: Path):
     assert fake.seeked_seconds == 12.5
 
 
+def test_video_cell_reports_mpv_load_failure(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    video_path = tmp_path / "broken.mp4"
+    video_path.write_bytes(b"fake")
+    fake = FailingMpvController("BadWindow invalid Window parameter")
+    original_factory = CellWidget.mpv_factory
+    CellWidget.mpv_factory = lambda window_id=None: fake
+    cell = CellWidget(0, THEMES["dark"], tmp_path)
+    failures = []
+    cell.video_load_failed.connect(lambda index, message: failures.append((index, message)))
+
+    try:
+        cell.set_content(
+            CellContent.video("v1"),
+            VideoItem(id="v1", title="Broken", path=str(video_path), src=str(video_path)),
+            AppSettings(),
+        )
+        labels = [label.text() for label in cell.findChildren(type(cell.overlay))]
+
+        assert failures == [(0, "BadWindow invalid Window parameter")]
+        assert any("Playback failed" in text and "BadWindow" in text for text in labels)
+        assert fake.stopped is True
+    finally:
+        CellWidget.mpv_factory = original_factory
+        cell._clear_body()
+
+
 def test_main_window_captures_playback_positions_before_saving_session(tmp_path: Path):
     app = QApplication.instance() or QApplication([])
     video_path = tmp_path / "one.mp4"
@@ -113,6 +140,20 @@ class FakeMpvController:
 
     def stop(self) -> None:
         return None
+
+
+class FailingMpvController:
+    available = True
+
+    def __init__(self, last_error: str) -> None:
+        self.last_error = last_error
+        self.stopped = False
+
+    def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60) -> bool:
+        return False
+
+    def stop(self) -> None:
+        self.stopped = True
 
 
 class _FakeMpv:

@@ -7,8 +7,9 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from playxls.config import ConfigStore
-from playxls.layout import preset_layouts
+from playxls.layout import LayoutDefinition, LayoutNode, preset_layouts
 from playxls.models import AppState, BrowserPreset, CellContent, FolderEntry, VideoItem
+from playxls.transport import TransportSnapshot
 from playxls.ui.main_window import MainWindow
 
 
@@ -59,6 +60,39 @@ def test_main_window_uses_splitter_for_resizable_sources_panel(tmp_path: Path):
     window.close()
 
 
+def test_main_window_restores_saved_sources_splitter_width(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    state.main_splitter_sizes = [260, 1020]
+
+    window = MainWindow(state, preset_layouts(), store)
+    window.show()
+    app.processEvents()
+
+    assert window.main_splitter.sizes()[0] == 260
+    window.close()
+
+
+def test_main_window_saves_current_sources_splitter_width(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    window = MainWindow(state, preset_layouts(), store)
+    window.show()
+    app.processEvents()
+    window.main_splitter.setSizes([240, 1040])
+    app.processEvents()
+    expected_sizes = window.main_splitter.sizes()
+
+    window._save_session()
+
+    assert expected_sizes[0] == 240
+    assert state.main_splitter_sizes == expected_sizes
+    assert store.load_session().main_splitter_sizes == expected_sizes
+    window.close()
+
+
 def test_remove_video_from_library_clears_cells_and_persists_ignore(tmp_path: Path):
     app = QApplication.instance() or QApplication([])
     video_path = tmp_path / "one.mp4"
@@ -99,6 +133,119 @@ def test_remove_folder_removes_folder_videos_and_clears_cells(tmp_path: Path):
     assert state.library_videos == []
     assert state.cell_content[0] == CellContent.empty()
     assert store.load_watch_folders() == []
+    window.close()
+
+
+def test_main_window_seeds_folder_scanner_from_loaded_library(monkeypatch, tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    calls = []
+
+    class FakeScanner:
+        def __init__(self, folders, on_added, interval_seconds, seen_paths=None, on_refreshed=None) -> None:
+            calls.append(
+                {
+                    "folders": folders,
+                    "interval_seconds": interval_seconds,
+                    "seen_paths": list(seen_paths or []),
+                    "on_refreshed": on_refreshed,
+                }
+            )
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr("playxls.ui.main_window.FolderScanner", FakeScanner)
+    video_path = tmp_path / "one.mp4"
+    ignored_path = tmp_path / "ignored.mp4"
+    video_path.write_bytes(b"fake")
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    state.folders = [FolderEntry(id="f1", name="NAS", path=str(tmp_path), count=1, live=True)]
+    state.library_videos = [VideoItem.from_path(video_path)]
+    state.ignored_video_paths = {str(ignored_path)}
+
+    window = MainWindow(state, preset_layouts(), store)
+
+    assert calls[0]["interval_seconds"] == 30.0
+    assert calls[0]["seen_paths"] == [str(video_path), str(ignored_path)]
+    assert calls[0]["on_refreshed"] is not None
+    window.close()
+
+
+def test_main_window_seeds_uncached_folder_scanner_without_prime(monkeypatch, tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    calls = []
+
+    class FakeScanner:
+        def __init__(self, folders, on_added, interval_seconds, seen_paths=None, on_refreshed=None) -> None:
+            calls.append(list(seen_paths or []))
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr("playxls.ui.main_window.FolderScanner", FakeScanner)
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    state.folders = [FolderEntry(id="f1", name="NAS", path=str(tmp_path), count=0, live=True)]
+
+    window = MainWindow(state, preset_layouts(), store)
+
+    assert calls == [[]]
+    window.close()
+
+
+def test_main_window_refreshes_library_index_from_folder_scan(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    video_path = tmp_path / "one.mp4"
+    video_path.write_bytes(b"fake")
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    state.folders = [FolderEntry(id="f1", name="NAS", path=str(tmp_path), count=0, live=True)]
+    window = MainWindow(state, preset_layouts(), store)
+
+    window._folder_scan_refreshed(
+        {
+            "videos": [VideoItem.from_path(video_path)],
+            "folder_counts": {"f1": 1},
+        }
+    )
+
+    assert [video.title for video in state.library_videos] == ["one"]
+    assert state.folders[0].count == 1
+    assert [video.title for video in store.load_library_index()] == ["one"]
+    window.close()
+
+
+def test_main_window_skips_cache_rewrite_when_folder_scan_is_unchanged(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    video_path = tmp_path / "one.mp4"
+    video_path.write_bytes(b"fake")
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    state.folders = [FolderEntry(id="f1", name="NAS", path=str(tmp_path), count=1, live=True)]
+    video = VideoItem.from_path(video_path)
+    state.library_videos = [video]
+    window = MainWindow(state, preset_layouts(), store)
+    saved_indexes = []
+    synced = []
+    window.store.save_library_index = saved_indexes.append
+    window._sync_ui = lambda: synced.append(True)
+
+    window._folder_scan_refreshed(
+        {
+            "videos": [video],
+            "folder_counts": {"f1": 1},
+        }
+    )
+
+    assert saved_indexes == []
+    assert synced == []
     window.close()
 
 
@@ -269,6 +416,77 @@ def test_transport_shuffle_button_toggles_and_persists(tmp_path: Path):
     window.close()
 
 
+def test_delete_custom_layout_removes_it_and_persists_remaining_custom_layouts(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    custom_a = LayoutDefinition("custom-a", "Desk A", LayoutNode.leaf(), custom=True)
+    custom_b = LayoutDefinition("custom-b", "Desk B", LayoutNode.leaf(), custom=True)
+    window = MainWindow(AppState(), [*preset_layouts(), custom_a, custom_b], store)
+
+    assert callable(getattr(window, "_delete_custom_layout", None))
+    window._delete_custom_layout("custom-a")
+
+    assert [layout.id for layout in window.layouts if layout.custom] == ["custom-b"]
+    assert [layout.id for layout in store.load_layouts()] == ["custom-b"]
+    window.close()
+
+
+def test_delete_current_custom_layout_falls_back_to_default_layout(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    state.layout_id = "custom-a"
+    custom = LayoutDefinition("custom-a", "Desk A", LayoutNode.leaf(), custom=True)
+    window = MainWindow(state, [*preset_layouts(), custom], store)
+
+    window._delete_custom_layout("custom-a")
+
+    assert state.layout_id == preset_layouts()[0].id
+    assert store.load_session().layout_id == preset_layouts()[0].id
+    assert store.load_layouts() == []
+    window.close()
+
+
+def test_delete_preset_layout_is_ignored(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    state.layout_id = "2x2"
+    layouts = preset_layouts()
+    window = MainWindow(state, layouts, store)
+
+    window._delete_custom_layout("2x2")
+
+    assert [layout.id for layout in window.layouts] == [layout.id for layout in layouts]
+    assert state.layout_id == "2x2"
+    window.close()
+
+
+def test_finished_video_auto_advances_repeat_all(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    first_path = tmp_path / "one.mp4"
+    second_path = tmp_path / "two.mp4"
+    first_path.write_bytes(b"fake")
+    second_path.write_bytes(b"fake")
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    first = VideoItem.from_path(first_path, index=1)
+    second = VideoItem.from_path(second_path, index=2)
+    state.library_videos = [first, second]
+    state.repeat_mode = "all"
+    window = MainWindow(state, preset_layouts(), store)
+    state.cell_content[0] = CellContent.video(first.id)
+    window.grid.cells = [_PlaybackCell(0, first, TransportSnapshot(position=10, duration=10, paused=False, eof_reached=True))]
+    window._sync_ui = lambda: None
+
+    window._refresh_transport()
+
+    assert state.cell_content[0] == CellContent.video(second.id)
+    assert store.load_session().cell_content[0] == CellContent.video(second.id)
+    window.grid.cells = []
+    window.close()
+
+
 class _Content:
     def __init__(self, kind: str, url: str = "") -> None:
         self.kind = kind
@@ -287,6 +505,25 @@ class _Cell:
 
     def set_volume(self, volume: float) -> None:
         self.volume = volume
+
+
+class _PlaybackMpv:
+    def __init__(self, snapshot: TransportSnapshot) -> None:
+        self.snapshot = snapshot
+
+    def transport_snapshot(self) -> TransportSnapshot:
+        return self.snapshot
+
+
+class _PlaybackCell:
+    def __init__(self, index: int, video: VideoItem, snapshot: TransportSnapshot) -> None:
+        self.index = index
+        self.video = video
+        self.content = CellContent.video(video.id)
+        self.mpv = _PlaybackMpv(snapshot)
+
+    def isVisible(self) -> bool:
+        return True
 
     def _clear_body(self) -> None:
         pass

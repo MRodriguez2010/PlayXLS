@@ -21,6 +21,7 @@ class TransportSnapshot:
     position: float | None = None
     duration: float | None = None
     paused: bool = False
+    eof_reached: bool = False
 
     @property
     def progress_percent(self) -> float:

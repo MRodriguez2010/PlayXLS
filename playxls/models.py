@@ -186,6 +186,7 @@ class SessionState:
     repeat_mode: RepeatMode = "none"
     shuffle: bool = False
     playback_positions: dict[str, float] = field(default_factory=dict)
+    main_splitter_sizes: list[int] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "SessionState":
@@ -217,6 +218,7 @@ class SessionState:
             repeat_mode=_coerce_repeat_mode(data.get("repeat_mode")),
             shuffle=bool(data.get("shuffle", False)),
             playback_positions=playback_positions,
+            main_splitter_sizes=_coerce_splitter_sizes(data.get("main_splitter_sizes")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -228,6 +230,7 @@ class SessionState:
             "repeat_mode": self.repeat_mode,
             "shuffle": self.shuffle,
             "playback_positions": self.playback_positions,
+            "main_splitter_sizes": self.main_splitter_sizes,
         }
 
 
@@ -247,6 +250,7 @@ class AppState:
     muted: bool = False
     repeat_mode: RepeatMode = "none"
     shuffle: bool = False
+    main_splitter_sizes: list[int] = field(default_factory=list)
 
     def ensure_cell_capacity(self, count: int) -> None:
         if len(self.cell_content) < count:
@@ -261,6 +265,7 @@ class AppState:
         self.repeat_mode = session.repeat_mode
         self.shuffle = session.shuffle
         self.playback_positions = dict(session.playback_positions)
+        self.main_splitter_sizes = list(session.main_splitter_sizes)
 
     def to_session(self) -> SessionState:
         return SessionState(
@@ -271,6 +276,7 @@ class AppState:
             repeat_mode=self.repeat_mode,
             shuffle=self.shuffle,
             playback_positions=dict(self.playback_positions),
+            main_splitter_sizes=list(self.main_splitter_sizes),
         )
 
 
@@ -327,3 +333,18 @@ def _coerce_repeat_mode(value: Any) -> RepeatMode:
     if mode in {"none", "one", "all", "folder"}:
         return mode  # type: ignore[return-value]
     return "none"
+
+
+def _coerce_splitter_sizes(value: Any) -> list[int]:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return []
+    sizes: list[int] = []
+    for item in value:
+        try:
+            size = int(item)
+        except (TypeError, ValueError):
+            return []
+        if size <= 0:
+            return []
+        sizes.append(size)
+    return sizes

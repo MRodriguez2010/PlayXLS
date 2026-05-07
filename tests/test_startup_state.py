@@ -5,22 +5,38 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pathlib import Path
 
 from playxls.config import ConfigStore
-from playxls.models import CellContent, FolderEntry, SessionState
+from playxls.models import CellContent, FolderEntry, SessionState, VideoItem
 from playxls.ui.main_window import build_state
 
 
-def test_build_state_scans_persisted_watch_folders_without_demo_videos(tmp_path: Path):
+def test_build_state_loads_cached_watch_folders_without_startup_scan(monkeypatch, tmp_path: Path):
     watch_dir = tmp_path / "Watch Me"
     watch_dir.mkdir()
     video = watch_dir / "local-video.mp4"
     video.write_bytes(b"not a real mp4 for metadata tests")
+    monkeypatch.setattr("playxls.ui.main_window.scan_folder", lambda path: (_ for _ in ()).throw(AssertionError(path)))
     store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
     store.save_watch_folders([FolderEntry(id="f1", name="Watch Me", path=str(watch_dir), count=0, live=True)])
+    store.save_library_index([VideoItem.from_path(video)])
 
     state, _layouts = build_state([], store)
 
     assert [item.title for item in state.library_videos] == ["local-video"]
     assert state.folders[0].count == 1
+
+
+def test_build_state_does_not_scan_uncached_watch_folders_on_startup(monkeypatch, tmp_path: Path):
+    watch_dir = tmp_path / "Watch Me"
+    watch_dir.mkdir()
+    (watch_dir / "local-video.mp4").write_bytes(b"not a real mp4 for metadata tests")
+    monkeypatch.setattr("playxls.ui.main_window.scan_folder", lambda path: (_ for _ in ()).throw(AssertionError(path)))
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    store.save_watch_folders([FolderEntry(id="f1", name="Watch Me", path=str(watch_dir), count=0, live=True)])
+
+    state, _layouts = build_state([], store)
+
+    assert state.library_videos == []
+    assert state.folders[0].count == 0
 
 
 def test_build_state_clears_session_cells_that_reference_missing_videos(tmp_path: Path):
@@ -29,6 +45,7 @@ def test_build_state_clears_session_cells_that_reference_missing_videos(tmp_path
     (watch_dir / "local-video.mp4").write_bytes(b"not a real mp4")
     store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
     store.save_watch_folders([FolderEntry(id="f1", name="Watch Me", path=str(watch_dir), count=0, live=True)])
+    store.save_library_index([VideoItem.from_path(watch_dir / "local-video.mp4")])
     store.save_session(SessionState(layout_id="1x1", cell_content=[CellContent.video("cli-1-bar")]))
 
     state, _layouts = build_state([], store)

@@ -5,6 +5,7 @@ os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 
 from pathlib import Path
 
+from PySide6.QtWebEngineCore import QWebEngineLoadingInfo
 from PySide6.QtWidgets import QApplication
 
 from playxls.models import AppSettings, CellContent
@@ -156,3 +157,74 @@ def test_browser_cell_reports_failed_page_load(tmp_path: Path):
 
     assert failures == [(1, "Load failed")]
     cell._clear_body()
+
+
+def test_browser_cell_reports_loading_changed_error_detail(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    cell = CellWidget(1, THEMES["dark"], tmp_path)
+    failures = []
+    cell.browser_load_failed.connect(lambda index, message: failures.append((index, message)))
+    cell.set_content(CellContent.browser("https://example.invalid", "Broken"), None, AppSettings())
+
+    cell._browser_loading_changed(FakeLoadingInfo("net::ERR_NAME_NOT_RESOLVED", -105, "https://example.invalid"))
+
+    assert failures == [(1, "net::ERR_NAME_NOT_RESOLVED (-105)")]
+    cell._clear_body()
+
+
+def test_browser_cell_does_not_overwrite_loading_error_with_generic_load_finished(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    cell = CellWidget(1, THEMES["dark"], tmp_path)
+    failures = []
+    cell.browser_load_failed.connect(lambda index, message: failures.append((index, message)))
+    cell.set_content(CellContent.browser("https://example.invalid", "Broken"), None, AppSettings())
+
+    cell._browser_loading_changed(FakeLoadingInfo("net::ERR_NAME_NOT_RESOLVED", -105, "https://example.invalid"))
+    cell._browser_load_finished(False)
+
+    assert failures == [(1, "net::ERR_NAME_NOT_RESOLVED (-105)")]
+    cell._clear_body()
+
+
+def test_browser_cell_resets_loading_error_state_when_content_changes(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    cell = CellWidget(1, THEMES["dark"], tmp_path)
+    failures = []
+    cell.browser_load_failed.connect(lambda index, message: failures.append((index, message)))
+    cell.set_content(CellContent.browser("https://example.invalid", "Broken"), None, AppSettings())
+
+    cell._browser_loading_changed(FakeLoadingInfo("net::ERR_NAME_NOT_RESOLVED", -105, "https://example.invalid"))
+    cell.set_content(CellContent.browser("https://other.invalid", "Other"), None, AppSettings())
+    cell._browser_load_finished(False)
+
+    assert failures == [(1, "net::ERR_NAME_NOT_RESOLVED (-105)"), (1, "Load failed")]
+    cell._clear_body()
+
+
+class FakeLoadingInfo:
+    def __init__(self, error: str, code: int, url: str) -> None:
+        self._error = error
+        self._code = code
+        self._url = _FakeUrl(url)
+
+    def status(self):
+        if QWebEngineLoadingInfo is None:
+            return "failed"
+        return QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus
+
+    def errorString(self) -> str:
+        return self._error
+
+    def errorCode(self) -> int:
+        return self._code
+
+    def url(self):
+        return self._url
+
+
+class _FakeUrl:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def toString(self) -> str:
+        return self.value

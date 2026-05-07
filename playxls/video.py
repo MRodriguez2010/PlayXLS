@@ -4,9 +4,10 @@ import json
 import os
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from playxls.runtime import find_executable
 from playxls.transport import TransportSnapshot
@@ -24,6 +25,9 @@ class MpvController:
         self.window_id = window_id
         self.process: subprocess.Popen[str] | None = None
         self.mpv_path = find_executable("mpv")
+        self.last_error = ""
+        self._output_tail: list[str] = []
+        self._output_thread: threading.Thread | None = None
         base_dir = ipc_dir or default_mpv_ipc_dir(self.mpv_path)
         base_dir.mkdir(parents=True, exist_ok=True)
         self.ipc_path = base_dir / f"playxls-mpv-{os.getpid()}-{id(self)}.sock"
@@ -33,7 +37,10 @@ class MpvController:
         return self.mpv_path is not None
 
     def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60) -> bool:
+        self.last_error = ""
+        self._output_tail = []
         if not self.available:
+            self.last_error = "mpv executable not found"
             return False
         self.stop()
         args = build_mpv_args(
@@ -45,7 +52,12 @@ class MpvController:
             loop=loop,
             volume=volume,
         )
-        self.process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+        try:
+            self.process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        except OSError as exc:
+            self.last_error = str(exc)
+            return False
+        self._start_output_reader()
         return self._wait_for_socket()
 
     def command(self, command: list[Any]) -> bool:
@@ -95,6 +107,7 @@ class MpvController:
             position=_float_or_none(self.get_property("time-pos")),
             duration=_float_or_none(self.get_property("duration")),
             paused=bool(self.get_property("pause")),
+            eof_reached=_bool_or_false(self.get_property("eof-reached")),
         )
 
     def seek_absolute(self, seconds: float) -> None:
@@ -116,6 +129,7 @@ class MpvController:
                 self.process.wait(timeout=0.5)
             except subprocess.TimeoutExpired:
                 self.process.terminate()
+        self._join_output_reader()
         self.process = None
         try:
             self.ipc_path.unlink()
@@ -126,11 +140,69 @@ class MpvController:
         deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline:
             if self.ipc_path.exists():
-                return True
+                return self._wait_for_load_result(deadline)
             if self.process and self.process.poll() is not None:
+                self._join_output_reader()
+                self.last_error = self._failure_message("mpv exited before playback started")
                 return False
             time.sleep(0.02)
-        return self.ipc_path.exists()
+        ready = self.ipc_path.exists()
+        if not ready:
+            self.last_error = self._failure_message("Timed out waiting for mpv IPC")
+        return ready
+
+    def _wait_for_load_result(self, deadline: float) -> bool:
+        while time.monotonic() < deadline:
+            if self.process and self.process.poll() is not None:
+                self._join_output_reader()
+                self.last_error = self._failure_message("mpv exited before playback started")
+                return False
+            if _response_succeeded(self.request(["get_property", "path"])):
+                return True
+            if _response_succeeded(self.request(["get_property", "duration"])):
+                return True
+            idle = self.request(["get_property", "idle-active"])
+            if idle and idle.get("error") == "success" and idle.get("data") is True and self._output_tail:
+                self.last_error = self._failure_message("mpv did not start playback")
+                return False
+            time.sleep(0.05)
+        self.last_error = self._failure_message("Timed out waiting for mpv playback")
+        return False
+
+    def _start_output_reader(self) -> None:
+        if not self.process or self.process.stdout is None:
+            return
+        self._output_thread = threading.Thread(
+            target=self._collect_output,
+            args=(self.process.stdout,),
+            name="playxls-mpv-output",
+            daemon=True,
+        )
+        self._output_thread.start()
+
+    def _collect_output(self, stream: TextIO) -> None:
+        try:
+            for line in stream:
+                self._record_output_line(line)
+        except ValueError:
+            return
+
+    def _record_output_line(self, line: str) -> None:
+        line = line.strip()
+        if not line or _is_noisy_output_line(line):
+            return
+        self._output_tail.append(line)
+        del self._output_tail[:-80]
+
+    def _join_output_reader(self) -> None:
+        if self._output_thread and self._output_thread.is_alive():
+            self._output_thread.join(timeout=0.2)
+        self._output_thread = None
+
+    def _failure_message(self, fallback: str) -> str:
+        if not self._output_tail:
+            return fallback
+        return "\n".join(self._output_tail[-6:])
 
     def __del__(self) -> None:
         self.stop()
@@ -173,7 +245,7 @@ def build_mpv_args(
 ) -> list[str]:
     args = [
         mpv_path,
-        "--no-terminal",
+        "--msg-level=all=warn",
         "--force-window=yes",
         "--idle=yes",
         "--osc=no",
@@ -204,3 +276,21 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _bool_or_false(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.casefold() in {"1", "true", "yes"}
+    return bool(value)
+
+
+def _response_succeeded(response: dict[str, Any] | None) -> bool:
+    return bool(response and response.get("error") == "success" and response.get("data") not in (None, ""))
+
+
+def _is_noisy_output_line(line: str) -> bool:
+    if line.startswith("[ipc_") and "Write error" in line:
+        return True
+    return "GLib-GIO-CRITICAL" in line

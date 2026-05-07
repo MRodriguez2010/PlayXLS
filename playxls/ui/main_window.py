@@ -22,10 +22,11 @@ from PySide6.QtWidgets import (
 from playxls.assets import app_icon_path, title_mark_path
 from playxls.browser import browser_compatibility_notice, normalize_browser_url
 from playxls.config import ConfigStore
-from playxls.folders import FolderScanner, scan_folder
+from playxls.folders import DEFAULT_SCAN_INTERVAL_SECONDS, FolderScanner, scan_folder
 from playxls.keybindings import KeyBindingRegistry, normalize_combo
 from playxls.layout import LayoutDefinition, count_cells, preset_layouts
 from playxls.models import VIDEO_EXTENSIONS, AppState, BrowserPreset, CellContent, FolderEntry, VideoItem
+from playxls.queueing import next_video_for_repeat
 from playxls.theme import Theme, app_stylesheet, resolve_theme
 from playxls.transport import TransportSnapshot
 from playxls.ui.dialogs import GridEditorDialog, SettingsDialog
@@ -34,8 +35,12 @@ from playxls.ui.panels import SourcesPanel
 from playxls.ui.widgets import LayoutThumbnailWidget, MonoLabel, ToastHost, make_section_label
 
 
+DEFAULT_MAIN_SPLITTER_SIZES = [320, 960]
+
+
 class MainWindow(QMainWindow):
     folder_video_detected = Signal(object)
+    folder_scan_refreshed = Signal(object)
 
     def __init__(
         self,
@@ -52,6 +57,7 @@ class MainWindow(QMainWindow):
         self.hovered_cell: int | None = None
         self.active_browser_cell: int | None = None
         self.browser_load_failures: dict[int, str] = {}
+        self._auto_advance_eof_keys: set[tuple[int, str]] = set()
         self.seek_user_active = False
         self.resume_after_minimize = False
         self.border_visible = state.settings.border_mode == "always"
@@ -62,6 +68,7 @@ class MainWindow(QMainWindow):
         self.registry = KeyBindingRegistry(state.bindings)
         self._register_keybindings()
         self.folder_video_detected.connect(self._folder_video_added)
+        self.folder_scan_refreshed.connect(self._folder_scan_refreshed)
         self.open_external_url = QDesktopServices.openUrl
 
         self.setWindowTitle("PlayXLS")
@@ -116,6 +123,7 @@ class MainWindow(QMainWindow):
         self.grid.browser_url_changed.connect(self._browser_url_changed)
         self.grid.browser_load_failed.connect(self._browser_load_failed)
         self.grid.browser_load_succeeded.connect(self._browser_load_succeeded)
+        self.grid.video_load_failed.connect(self._video_load_failed)
         stage_inner.addWidget(self.grid, 1)
         stage_layout.addWidget(self.stage_frame, 1)
         self.transport = self._transport()
@@ -123,7 +131,7 @@ class MainWindow(QMainWindow):
         self.main_splitter.addWidget(self.stage_shell)
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
-        self.main_splitter.setSizes([320, 960])
+        self._restore_main_splitter_sizes()
         root.addWidget(self.main_splitter, 1)
 
         self.toast = ToastHost(self.theme, self.stage_shell)
@@ -382,6 +390,13 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         custom = menu.addAction("Create Custom Layout")
         custom.triggered.connect(self._open_grid_editor)
+        custom_layouts = [layout for layout in self.layouts if layout.custom]
+        if custom_layouts:
+            delete_menu = menu.addMenu("Delete Custom Layout")
+            for layout in custom_layouts:
+                action = QAction(layout.label, self)
+                action.triggered.connect(lambda _=False, layout_id=layout.id: self._delete_custom_layout(layout_id))
+                delete_menu.addAction(action)
         menu.exec(self.layout_button.mapToGlobal(self.layout_button.rect().bottomLeft()))
 
     def _hover_menu(self) -> None:
@@ -522,7 +537,38 @@ class MainWindow(QMainWindow):
             snapshot = TransportSnapshot()
             self._set_transport_snapshot(snapshot, enabled=False)
             return
-        self._set_transport_snapshot(mpv.transport_snapshot(), enabled=True)
+        snapshot = mpv.transport_snapshot()
+        if self._auto_advance_finished_video(cell, snapshot):
+            return
+        self._set_transport_snapshot(snapshot, enabled=True)
+
+    def _auto_advance_finished_video(self, cell, snapshot: TransportSnapshot) -> bool:
+        index = int(getattr(cell, "index", -1))
+        video = getattr(cell, "video", None)
+        if not snapshot.eof_reached:
+            self._auto_advance_eof_keys = {key for key in self._auto_advance_eof_keys if key[0] != index}
+            return False
+        if index < 0 or not video:
+            return False
+        key = (index, video.id)
+        if key in self._auto_advance_eof_keys:
+            return False
+        next_video = next_video_for_repeat(
+            video,
+            self.state.library_videos,
+            repeat_mode=self.state.repeat_mode,
+            shuffle=self.state.shuffle,
+        )
+        if not next_video:
+            return False
+        self._auto_advance_eof_keys.add(key)
+        self.state.ensure_cell_capacity(index + 1)
+        self.state.cell_content[index] = CellContent.video(next_video.id)
+        self.state.playing = True
+        self._save_session()
+        self._toast(f"{next_video.title} → Cell {index + 1}")
+        self._sync_ui()
+        return True
 
     def _set_transport_snapshot(self, snapshot: TransportSnapshot, *, enabled: bool) -> None:
         self.time_left.setText(snapshot.position_text)
@@ -706,6 +752,9 @@ class MainWindow(QMainWindow):
         if self._browser_control_cell_index() == index:
             self._sync_browser_toolbar()
 
+    def _video_load_failed(self, index: int, message: str) -> None:
+        self._toast(f"Cell {index + 1}: {message or 'Playback failed'}")
+
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self.theme, self.state.settings, self.state.bindings, self)
         dialog.settings_changed.connect(lambda settings: self._settings_changed())
@@ -727,6 +776,18 @@ class MainWindow(QMainWindow):
         self._toast(f'Saved "{custom.label}"')
         self._sync_ui()
 
+    def _delete_custom_layout(self, layout_id: str) -> None:
+        target = next((layout for layout in self.layouts if layout.id == layout_id and layout.custom), None)
+        if target is None:
+            return
+        self.layouts = [layout for layout in self.layouts if layout.id != layout_id]
+        if self.state.layout_id == layout_id:
+            self.state.layout_id = self.layouts[0].id
+        self.store.save_layouts([layout for layout in self.layouts if layout.custom])
+        self._save_session()
+        self._toast(f'Deleted "{target.label}"')
+        self._sync_ui()
+
     def _settings_changed(self, save_only: bool = False) -> None:
         self.store.save_settings(self.state.settings)
         new_theme = resolve_theme(self.state.settings.theme)
@@ -746,7 +807,12 @@ class MainWindow(QMainWindow):
     def _save_session(self) -> None:
         if self.state.settings.save_playback_position:
             self._capture_playback_positions()
+        self.state.main_splitter_sizes = _valid_main_splitter_sizes(self.main_splitter.sizes())
         self.store.save_session(self.state.to_session())
+
+    def _restore_main_splitter_sizes(self) -> None:
+        sizes = _valid_main_splitter_sizes(self.state.main_splitter_sizes) or DEFAULT_MAIN_SPLITTER_SIZES
+        self.main_splitter.setSizes(sizes)
 
     def _folders_changed(self) -> None:
         self.store.save_watch_folders(self.state.folders)
@@ -765,6 +831,7 @@ class MainWindow(QMainWindow):
                 existing.add(video.path)
         self.store.save_watch_folders(self.state.folders)
         self.store.save_ignored_video_paths(self.state.ignored_video_paths)
+        self.store.save_library_index(_dedupe_videos(self.state.library_videos))
         self._toast(f"Added: {folder.name}")
         self._sync_ui()
         self._start_folder_scanner()
@@ -793,6 +860,7 @@ class MainWindow(QMainWindow):
         }
         self.store.save_watch_folders(self.state.folders)
         self.store.save_ignored_video_paths(self.state.ignored_video_paths)
+        self.store.save_library_index(_dedupe_videos(self.state.library_videos))
         self._save_session()
         self._toast(f"Removed: {folder.name}")
         self._sync_ui()
@@ -833,20 +901,80 @@ class MainWindow(QMainWindow):
             self.state.ignored_video_paths.add(source)
             self.state.playback_positions.pop(source, None)
             self.store.save_ignored_video_paths(self.state.ignored_video_paths)
+            self.store.save_library_index(_dedupe_videos([*self.state.library_videos, video]))
         self._save_session()
         self._toast(f"Removed: {video.title}")
         self._sync_ui()
 
     def _start_folder_scanner(self) -> None:
-        self.folder_scanner = FolderScanner(self.state.folders, self.folder_video_detected.emit, interval_seconds=5.0)
+        if self.folder_scanner:
+            self.folder_scanner.stop()
+        if not self.state.folders:
+            self.folder_scanner = None
+            return
+        seen_paths = [video.path for video in self.state.library_videos if video.path]
+        seen_paths.extend(self.state.ignored_video_paths)
+        self.folder_scanner = FolderScanner(
+            self.state.folders,
+            self.folder_video_detected.emit,
+            interval_seconds=DEFAULT_SCAN_INTERVAL_SECONDS,
+            seen_paths=seen_paths,
+            on_refreshed=self.folder_scan_refreshed.emit,
+        )
         self.folder_scanner.start()
 
     def _folder_video_added(self, video: VideoItem) -> None:
         if video.path in self.state.ignored_video_paths:
             return
         self.state.library_videos.append(video)
+        self.store.save_library_index(_dedupe_videos(self.state.library_videos))
         self._toast(f"Added: {video.title}")
         self._sync_ui()
+
+    def _folder_scan_refreshed(self, payload: dict[str, object]) -> None:
+        scanned = [video for video in payload.get("videos", []) if isinstance(video, VideoItem)]
+        folder_counts = payload.get("folder_counts", {})
+        counts = folder_counts if isinstance(folder_counts, dict) else {}
+        scanned_folders = [folder for folder in self.state.folders if folder.id in counts]
+        old_counts = {folder.id: folder.count for folder in scanned_folders}
+        for folder in scanned_folders:
+            try:
+                folder.count = int(counts.get(folder.id, folder.count))
+            except (TypeError, ValueError):
+                pass
+        scanned_paths = {video.path for video in scanned if video.path}
+        old_paths = {video.path for video in self.state.library_videos if video.path}
+        new_visible_scanned_paths = {path for path in scanned_paths if path not in self.state.ignored_video_paths}
+        counts_changed = any(folder.count != old_counts.get(folder.id, folder.count) for folder in scanned_folders)
+        if not counts_changed and old_paths == new_visible_scanned_paths:
+            return
+        kept = [
+            video
+            for video in self.state.library_videos
+            if not video.path or not any(_path_is_inside_without_resolve(video.path, folder.path) for folder in scanned_folders)
+        ]
+        indexed = _dedupe_videos([*kept, *scanned])
+        visible = [video for video in indexed if not video.path or video.path not in self.state.ignored_video_paths]
+        new_paths = {video.path for video in visible if video.path}
+        paths_changed = old_paths != new_paths
+        if not paths_changed and not counts_changed:
+            return
+        self.state.library_videos = visible
+        _remove_missing_video_cells(self.state)
+        self.store.save_watch_folders(self.state.folders)
+        if paths_changed:
+            self.store.save_library_index(indexed)
+            added_count = len(new_paths - old_paths)
+            removed_count = len(old_paths - new_paths)
+            if added_count and not removed_count:
+                self._toast(f"Library refreshed: +{added_count}")
+            elif removed_count and not added_count:
+                self._toast(f"Library refreshed: -{removed_count}")
+            elif added_count or removed_count:
+                self._toast("Library refreshed")
+            self._sync_ui()
+        elif counts_changed:
+            self._sync_ui()
 
     def _clear_video_cells(self, video_ids: set[str]) -> None:
         self.state.cell_content = [
@@ -942,20 +1070,32 @@ def build_state(cli_paths: list[str], store: ConfigStore) -> tuple[AppState, lis
         count = len(state.library_videos)
         state.layout_id = "1x1" if count <= 1 else "1x2" if count == 2 else "1+2" if count == 3 else "2x2" if count <= 4 else "3x3"
     else:
-        state.library_videos = _load_watch_folder_videos(state.folders, state.ignored_video_paths)
+        state.library_videos = _load_watch_folder_videos(
+            state.folders,
+            store.load_library_index(),
+            state.ignored_video_paths,
+        )
         state.apply_session(store.load_session())
         _remove_missing_video_cells(state)
     return state, layouts
 
 
-def _load_watch_folder_videos(folders: list[FolderEntry], ignored_paths: set[str] | None = None) -> list[VideoItem]:
+def _load_watch_folder_videos(
+    folders: list[FolderEntry],
+    indexed_videos: list[VideoItem],
+    ignored_paths: set[str] | None = None,
+) -> list[VideoItem]:
     ignored_paths = ignored_paths or set()
     videos: list[VideoItem] = []
     for folder in folders:
-        found = scan_folder(folder.path)
+        found = [
+            video
+            for video in indexed_videos
+            if video.path and _path_is_inside_without_resolve(video.path, folder.path)
+        ]
         folder.count = len(found)
         videos.extend(video for video in found if video.path not in ignored_paths)
-    return videos
+    return _dedupe_videos(videos)
 
 
 def _prune_missing_prototype_folders(folders: list[FolderEntry]) -> list[FolderEntry]:
@@ -973,6 +1113,41 @@ def _remove_missing_video_cells(state: AppState) -> None:
         CellContent.empty() if content.kind == "video" and content.video_id not in valid_video_ids else content
         for content in state.cell_content
     ]
+
+
+def _dedupe_videos(videos: list[VideoItem]) -> list[VideoItem]:
+    out: list[VideoItem] = []
+    seen: set[str] = set()
+    for video in videos:
+        key = video.path or video.src or video.id
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(video)
+    return out
+
+
+def _valid_main_splitter_sizes(sizes: list[int]) -> list[int]:
+    if len(sizes) != 2:
+        return []
+    out: list[int] = []
+    for size in sizes:
+        try:
+            value = int(size)
+        except (TypeError, ValueError):
+            return []
+        if value <= 0:
+            return []
+        out.append(value)
+    return out
+
+
+def _path_is_inside_without_resolve(path: str, folder: str) -> bool:
+    try:
+        Path(path).expanduser().relative_to(Path(folder).expanduser())
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def _is_path_inside(path: str, folder: str) -> bool:

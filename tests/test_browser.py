@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import playxls.browser as browser
-from playxls.browser import BrowserFullscreenBridge, browser_profile_paths, normalize_browser_url
+from playxls.browser import BrowserFullscreenBridge, browser_load_failure_message, browser_profile_paths, normalize_browser_url
 
 
 class FakeFullscreenRequest:
@@ -70,7 +70,51 @@ def test_browser_compatibility_notice_flags_drm_heavy_services():
         assert "DRM" in notice.label
 
 
+def test_browser_compatibility_notice_flags_pluto_playback_limit():
+    notice = browser.browser_compatibility_notice("https://pluto.tv/")
+
+    assert notice is not None
+    assert notice.level == "warning"
+    assert "Playback" in notice.label
+
+
 def test_browser_compatibility_notice_allows_standard_video_sites():
     assert browser.browser_compatibility_notice("https://youtube.com") is None
     assert browser.browser_compatibility_notice("https://twitch.tv") is None
     assert browser.browser_compatibility_notice("https://example.com") is None
+
+
+def test_browser_load_failure_message_uses_qt_error_detail():
+    info = FakeLoadingInfo("net::ERR_NAME_NOT_RESOLVED", -105, "https://example.invalid")
+
+    assert browser_load_failure_message(info) == "net::ERR_NAME_NOT_RESOLVED (-105)"
+
+
+def test_browser_load_failure_message_falls_back_to_url_host():
+    info = FakeLoadingInfo("", 0, "https://example.invalid/path")
+
+    assert browser_load_failure_message(info) == "Failed to load example.invalid"
+
+
+class FakeLoadingInfo:
+    def __init__(self, error: str, code: int, url: str) -> None:
+        self._error = error
+        self._code = code
+        self._url = _FakeUrl(url)
+
+    def errorString(self) -> str:
+        return self._error
+
+    def errorCode(self) -> int:
+        return self._code
+
+    def url(self):
+        return self._url
+
+
+class _FakeUrl:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def toString(self) -> str:
+        return self.value

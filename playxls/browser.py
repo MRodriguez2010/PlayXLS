@@ -47,6 +47,10 @@ DRM_LIMITED_DOMAINS = {
     "primevideo.com",
 }
 
+PLAYBACK_LIMITED_DOMAINS = {
+    "pluto.tv",
+}
+
 
 def browser_profile_paths(cache_dir: Path, cell_number: int, *, profile_scope: str = "shared") -> BrowserProfilePaths:
     if profile_scope != "per_cell":
@@ -85,4 +89,39 @@ def browser_compatibility_notice(raw_url: str) -> BrowserCompatibilityNotice | N
             label="DRM limited",
             detail="Protected video may not play inside QtWebEngine. Use the system browser if playback is blocked.",
         )
+    if any(host == domain or host.endswith(f".{domain}") for domain in PLAYBACK_LIMITED_DOMAINS):
+        return BrowserCompatibilityNotice(
+            level="warning",
+            label="Playback limited",
+            detail="This service may use protected streams or codecs that are not available inside QtWebEngine. Use the system browser if playback is blocked.",
+        )
     return None
+
+
+def browser_load_failure_message(info) -> str:
+    error = _call_string(info, "errorString")
+    code = _call_int(info, "errorCode")
+    if error:
+        return f"{error} ({code})" if code else error
+    raw_url = ""
+    try:
+        raw_url = info.url().toString()
+    except (AttributeError, TypeError):
+        pass
+    host = urlparse(raw_url).hostname or raw_url
+    return f"Failed to load {host}" if host else "Load failed"
+
+
+def _call_string(obj, name: str) -> str:
+    try:
+        value = getattr(obj, name)()
+    except (AttributeError, TypeError):
+        return ""
+    return str(value).strip()
+
+
+def _call_int(obj, name: str) -> int:
+    try:
+        return int(getattr(obj, name)())
+    except (AttributeError, TypeError, ValueError):
+        return 0
