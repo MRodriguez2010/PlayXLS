@@ -110,6 +110,8 @@ class GridStage(QFrame):
             else:
                 cell.setGeometry(target)
             cell.raise_()
+        if self.fullscreen_cell is None and self.hovered_cell is not None and self.hovered_cell < len(self.cells):
+            self.cells[self.hovered_cell].raise_()
         if self.fullscreen_cell is not None and self.fullscreen_cell < len(self.cells):
             self.cells[self.fullscreen_cell].raise_()
 

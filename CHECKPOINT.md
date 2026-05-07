@@ -53,6 +53,12 @@ The app-level transport now includes repeat and shuffle controls with persisted 
 
 User manually confirmed that shared browser login persists across cells, and browser-video fullscreen is correctly confined to the cell.
 
+## Latest Hover Fix
+
+User reported that hover expansion only stacked correctly for Cell 4; Cells 1, 2, and 3 expanded underneath later cells and were clipped. Root cause: `GridStage.reposition()` raised every cell in index order on each layout pass, which made the last cell topmost unless a cell was fullscreen. Hover expansion changed geometry but did not change stacking.
+
+Fix: after normal layout positioning, `GridStage.reposition()` now raises the hovered cell above siblings when no cell fullscreen is active. A Qt regression test verifies that an expanded hovered Cell 1 is the top widget at an overlap point that previously returned Cell 4.
+
 ## Verification
 
 Latest full verification:
@@ -72,12 +78,13 @@ PY
 
 Results:
 
-- Transport/config focused tests: `26 passed in 1.87s`
-- Full suite: `80 passed in 2.90s`
+- Grid/browser/main-window focused tests: `30 passed in 2.21s`
+- Full suite: `81 passed in 3.14s`
 - `compiled 21 Python source files`
 - Diagnostics found `/snap/bin/mpv`, PySide6, and QtWebEngine.
 - X11 screenshot validation saved `/tmp/playxls-browser-grid.png`, `/tmp/playxls-browser-drm-notice.png`, and `/tmp/playxls-browser-external-button.png`; the app-level toolbar was visible, selected browser cells rendered, and the `DRM limited` notice plus external-open button fit without crowding the URL field.
 - Transport screenshot validation saved `/tmp/playxls-transport-repeat-shuffle.png`; repeat/shuffle controls fit at `960x620`.
+- Hover stack screenshot saved `/tmp/playxls-hover-stack.png`; expanded Cell 1 rendered above overlapping cells.
 
 ## Next Steps
 
