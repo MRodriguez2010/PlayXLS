@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from playxls.config import ConfigStore
@@ -106,3 +107,15 @@ def test_session_round_trip_preserves_main_splitter_sizes(tmp_path: Path):
     loaded = store.load_session()
 
     assert loaded.main_splitter_sizes == [280, 1000]
+
+
+def test_config_store_appends_playback_diagnostic_jsonl(tmp_path: Path):
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+
+    written = store.append_playback_diagnostic({"kind": "video_load_failed", "message": "BadWindow"})
+
+    assert written is True
+    records = [json.loads(line) for line in store.playback_diagnostics_path.read_text().splitlines()]
+    assert records[0]["kind"] == "video_load_failed"
+    assert records[0]["message"] == "BadWindow"
+    assert records[0]["timestamp"].endswith("+00:00")

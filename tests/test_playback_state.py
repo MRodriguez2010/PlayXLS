@@ -1,4 +1,5 @@
 import os
+import json
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -90,6 +91,37 @@ def test_main_window_captures_playback_positions_before_saving_session(tmp_path:
 
     assert store.load_session().playback_positions == {str(video_path): 9.25}
     window.grid.cells = []
+    window.close()
+
+
+def test_main_window_logs_video_load_failures(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    video_path = tmp_path / "broken.mp4"
+    video_path.write_bytes(b"fake")
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    video = VideoItem(id="v1", title="Broken", path=str(video_path), src=str(video_path))
+    window = MainWindow(state, preset_layouts(), store)
+    state.library_videos = [video]
+    state.cell_content[0] = CellContent.video(video.id)
+    toasts = []
+    window._toast = lambda message: toasts.append(message)
+
+    window._video_load_failed(0, "BadWindow invalid Window parameter")
+
+    records = [json.loads(line) for line in store.playback_diagnostics_path.read_text().splitlines()]
+    assert records == [
+        {
+            "cell": 1,
+            "kind": "video_load_failed",
+            "message": "BadWindow invalid Window parameter",
+            "source": str(video_path),
+            "timestamp": records[0]["timestamp"],
+            "title": "Broken",
+            "video_id": "v1",
+        }
+    ]
+    assert toasts == ["Cell 1: BadWindow invalid Window parameter"]
     window.close()
 
 

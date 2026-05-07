@@ -33,6 +33,7 @@ Without file arguments, PlayXLS opens the persisted session and scans configured
 - mpv subprocess adapter for local video cells when `mpv` is installed.
 - Embedded mpv cells launch with mpv OSC/OSD/default bindings disabled so local-video controls stay in the app-level transport and do not interfere with hover expansion.
 - Local-video load failures now surface mpv diagnostics in the cell and toast instead of failing silently.
+- Local-video load failures are also appended to `~/.local/state/playxls/playback-diagnostics.jsonl` for post-run debugging.
 - QtWebEngine browser cells when the PySide6 WebEngine wheel is present.
 - Shared QtWebEngine browser profile by default with one reused `QWebEngineProfile` and persistent storage/cache under `~/.cache/playxls/browser/shared/`.
 - Advanced setting to switch browser cells between shared login/cookie storage and isolated per-cell profiles under `~/.cache/playxls/browser/cell-N/`.

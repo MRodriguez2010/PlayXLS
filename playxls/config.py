@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tomllib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -57,12 +58,29 @@ class ConfigStore:
     def log_path(self) -> Path:
         return self.state_dir / "playxls.log"
 
+    @property
+    def playback_diagnostics_path(self) -> Path:
+        return self.state_dir / "playback-diagnostics.jsonl"
+
     def ensure_dirs(self) -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
         (self.config_dir / "sessions").mkdir(parents=True, exist_ok=True)
         (self.cache_dir / "thumbs").mkdir(parents=True, exist_ok=True)
         (self.cache_dir / "browser").mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
+
+    def append_playback_diagnostic(self, event: dict[str, Any]) -> bool:
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **event,
+        }
+        try:
+            self.ensure_dirs()
+            with self.playback_diagnostics_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, sort_keys=True) + "\n")
+        except OSError:
+            return False
+        return True
 
     def load_settings(self) -> AppSettings:
         data = self._read_toml(self.settings_path)

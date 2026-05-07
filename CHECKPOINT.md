@@ -18,7 +18,7 @@ The latest slice added preview/library performance certification, persisted Sour
 
 Local-video assignment no longer treats creation of the mpv IPC socket as proof that playback loaded. `MpvController` now captures mpv's combined stdout/stderr tail, keeps loader diagnostics available with `--msg-level=all=warn`, and waits for actual loaded media state (`path` or `duration`) before reporting success. If mpv reaches idle after a loader error, PlayXLS treats that as a failed load and stores a cleaned `last_error` instead of leaving the cell in a broken-looking playback state.
 
-Failed video cells now show `Playback failed` plus the mpv diagnostic inside the cell surface, emit `video_load_failed` through `CellWidget` and `GridStage`, and raise a toast from `MainWindow` with the affected cell number. Noisy shutdown lines such as mpv IPC write errors and GLib/GIO cleanup warnings are filtered out of the user-facing diagnostic.
+Failed video cells now show `Playback failed` plus the mpv diagnostic inside the cell surface, emit `video_load_failed` through `CellWidget` and `GridStage`, and raise a toast from `MainWindow` with the affected cell number. Main window failures also append a JSONL record to `~/.local/state/playxls/playback-diagnostics.jsonl` with timestamp, cell, video id, title/source, and cleaned mpv message. Noisy shutdown lines such as mpv IPC write errors and GLib/GIO cleanup warnings are filtered out of the user-facing diagnostic.
 
 Validation included a valid local-file smoke and an invalid-source smoke. The valid file loaded with a detected duration of about `21.48s`; the invalid source failed cleanly with mpv's unsupported-protocol diagnostic instead of appearing to load.
 
@@ -166,7 +166,8 @@ PY
 Results:
 
 - Focused diagnostics/playback/browser transport tests: `53 passed in 2.72s`
-- Full suite: `118 passed in 5.22s`
+- Focused config/playback/video/main-window transport tests after adding persistent playback diagnostics: `50 passed in 2.59s`
+- Full suite: `120 passed in 4.79s`
 - `compiled 22 Python source files`
 - Diagnostics found `/snap/bin/mpv`, PySide6, QtWebEngine, `libxcb-cursor.so.0`, and now selects Qt platform `xcb`.
 - Valid local-file smoke: `MpvController.load()` returned true, kept `last_error=''`, and detected a `21.48s` duration.
@@ -185,4 +186,4 @@ Results:
 1. Run full test suite after any follow-up code edits.
 2. Continue interactive site-by-site validation for login, fullscreen, and protected playback where credentials/playback access are available.
 3. Decide whether the next backend milestone is hardening the subprocess-mpv adapter or beginning the direct libmpv migration.
-4. Consider persisting mpv diagnostic tails to a debug log if user reports continue to require post-crash evidence.
+4. Continue watching the new playback diagnostics log during real NAS playback tests and use it to decide whether failures are codec/container issues, embed/window issues, or backend crashes.

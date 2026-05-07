@@ -753,7 +753,24 @@ class MainWindow(QMainWindow):
             self._sync_browser_toolbar()
 
     def _video_load_failed(self, index: int, message: str) -> None:
+        self._log_video_load_failure(index, message)
         self._toast(f"Cell {index + 1}: {message or 'Playback failed'}")
+
+    def _log_video_load_failure(self, index: int, message: str) -> None:
+        content = self.state.cell_content[index] if 0 <= index < len(self.state.cell_content) else CellContent.empty()
+        video = None
+        if content.kind == "video" and content.video_id:
+            video = next((item for item in self.state.library_videos if item.id == content.video_id), None)
+        self.store.append_playback_diagnostic(
+            {
+                "kind": "video_load_failed",
+                "cell": index + 1,
+                "video_id": content.video_id if content.kind == "video" else "",
+                "title": video.title if video else "",
+                "source": (video.path or video.src) if video else "",
+                "message": message or "Playback failed",
+            }
+        )
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self.theme, self.state.settings, self.state.bindings, self)
