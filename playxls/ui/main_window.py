@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon, QKeyEvent
+from PySide6.QtGui import QAction, QDesktopServices, QDragEnterEvent, QDropEvent, QIcon, QKeyEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self.registry = KeyBindingRegistry(state.bindings)
         self._register_keybindings()
         self.folder_video_detected.connect(self._folder_video_added)
+        self.open_external_url = QDesktopServices.openUrl
 
         self.setWindowTitle("PlayXLS")
         icon_path = app_icon_path()
@@ -250,7 +251,9 @@ class MainWindow(QMainWindow):
         self.browser_back = QPushButton("‹")
         self.browser_forward = QPushButton("›")
         self.browser_reload = QPushButton("↻")
-        for button in (self.browser_back, self.browser_forward, self.browser_reload):
+        self.browser_external = QPushButton("↗")
+        self.browser_external.setToolTip("Open in system browser")
+        for button in (self.browser_back, self.browser_forward, self.browser_reload, self.browser_external):
             button.setFixedSize(28, 28)
             layout.addWidget(button)
         self.browser_url = QLineEdit()
@@ -265,6 +268,7 @@ class MainWindow(QMainWindow):
         self.browser_back.clicked.connect(lambda: self._browser_action("back"))
         self.browser_forward.clicked.connect(lambda: self._browser_action("forward"))
         self.browser_reload.clicked.connect(lambda: self._browser_action("reload"))
+        self.browser_external.clicked.connect(self._browser_open_external)
         self.browser_url.returnPressed.connect(self._browser_go)
         toolbar.hide()
         return toolbar
@@ -608,6 +612,7 @@ class MainWindow(QMainWindow):
             self.browser_notice.hide()
         for control in (self.browser_back, self.browser_forward, self.browser_reload, self.browser_url):
             control.setEnabled(enabled)
+        self.browser_external.setEnabled(bool(cell and (url or getattr(getattr(cell, "content", None), "url", ""))))
 
     def _browser_action(self, action: str) -> None:
         cell = self._browser_control_cell()
@@ -627,6 +632,15 @@ class MainWindow(QMainWindow):
         if not view:
             return
         view.setUrl(QUrl(normalize_browser_url(self.browser_url.text())))
+
+    def _browser_open_external(self) -> None:
+        cell = self._browser_control_cell()
+        if not cell:
+            return
+        raw_url = getattr(getattr(cell, "content", None), "url", "") or self.browser_url.text()
+        if not raw_url:
+            return
+        self.open_external_url(QUrl(normalize_browser_url(raw_url)))
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self.theme, self.state.settings, self.state.bindings, self)

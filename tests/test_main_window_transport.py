@@ -185,6 +185,23 @@ def test_browser_toolbar_hides_limited_notice_for_standard_browser_cell(tmp_path
     window.close()
 
 
+def test_browser_toolbar_opens_active_browser_cell_in_system_browser(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    window = MainWindow(AppState(), preset_layouts(), store)
+    opened = []
+    window.open_external_url = lambda url: opened.append(url.toString())
+    window.grid.cells = [_Cell(kind="browser", index=0, web_view=_WebView("netflix.com"), url="https://netflix.com")]
+
+    window._sync_browser_toolbar()
+    window._browser_open_external()
+
+    assert window.browser_external.isEnabled() is True
+    assert opened == ["https://netflix.com"]
+    window.grid.cells = []
+    window.close()
+
+
 class _Content:
     def __init__(self, kind: str, url: str = "") -> None:
         self.kind = kind

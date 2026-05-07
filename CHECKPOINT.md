@@ -33,6 +33,8 @@ The app-level browser toolbar now shows a short `DRM limited` compatibility noti
 
 The classifier is pure URL-based behavior in `playxls.browser.browser_compatibility_notice`, so future service-specific handling can be tested without constructing Qt widgets.
 
+The same toolbar now includes an external-open handoff button for the active browser cell. It opens the assigned/current URL through `QDesktopServices.openUrl`, with the callable kept injectable as `MainWindow.open_external_url` for tests. This gives DRM-limited services and login-hostile embedded flows a clear system-browser escape path.
+
 ## Verification
 
 Latest full verification:
@@ -52,15 +54,15 @@ PY
 
 Results:
 
-- Browser/config/settings focused tests: `33 passed in 2.14s`
-- Full suite: `72 passed in 3.12s`
+- Browser/config/settings focused tests: `34 passed in 1.78s`
+- Full suite: `73 passed in 2.64s`
 - `compiled 21 Python source files`
 - Diagnostics found `/snap/bin/mpv`, PySide6, and QtWebEngine.
-- X11 screenshot validation saved `/tmp/playxls-browser-grid.png` and `/tmp/playxls-browser-drm-notice.png`; the app-level toolbar was visible, selected browser cells rendered, and the `DRM limited` notice fit without crowding the URL field.
+- X11 screenshot validation saved `/tmp/playxls-browser-grid.png`, `/tmp/playxls-browser-drm-notice.png`, and `/tmp/playxls-browser-external-button.png`; the app-level toolbar was visible, selected browser cells rendered, and the `DRM limited` notice plus external-open button fit without crowding the URL field.
 
 ## Next Steps
 
 1. Run full test suite after any follow-up edits.
 2. Manually validate YouTube/Twitch browser cells with shared-profile cookies and page fullscreen.
-3. Add an explicit “open in system browser” handoff if DRM-limited services or login flows need it.
+3. Decide whether browser limitation notices should also appear in the Sources browser list, not only the active toolbar.
 4. Capture site-specific QtWebEngine failure states and route them into concise user-facing messages.
