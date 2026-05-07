@@ -37,3 +37,27 @@ def test_folder_scanner_refreshes_in_one_batch(monkeypatch, tmp_path: Path):
     assert added == []
     assert refreshed[0]["folder_counts"] == {"f1": 1}
     assert [item.title for item in refreshed[0]["videos"]] == ["one"]
+
+
+def test_folder_scanner_reports_scan_errors_in_refresh_payload(monkeypatch, tmp_path: Path):
+    refreshed = []
+
+    def fail_scan(path: str):
+        raise OSError("mount unavailable")
+
+    monkeypatch.setattr("playxls.folders._iter_video_files", fail_scan)
+    scanner = FolderScanner(
+        [FolderEntry(id="f1", name="NAS", path=str(tmp_path), live=True)],
+        lambda video: None,
+        on_refreshed=refreshed.append,
+    )
+
+    scanner.scan_once()
+
+    assert refreshed == [
+        {
+            "videos": [],
+            "folder_counts": {},
+            "folder_errors": {"f1": "mount unavailable"},
+        }
+    ]

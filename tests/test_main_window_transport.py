@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import json
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
@@ -246,6 +247,26 @@ def test_main_window_skips_cache_rewrite_when_folder_scan_is_unchanged(tmp_path:
 
     assert saved_indexes == []
     assert synced == []
+    window.close()
+
+
+def test_main_window_logs_folder_scan_failures(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    state.folders = [FolderEntry(id="f1", name="NAS", path=str(tmp_path), count=1, live=True)]
+    window = MainWindow(state, preset_layouts(), store)
+    toasts = []
+    window._toast = toasts.append
+
+    window._folder_scan_refreshed({"videos": [], "folder_counts": {}, "folder_errors": {"f1": "mount unavailable"}})
+
+    records = [json.loads(line) for line in store.playback_diagnostics_path.read_text().splitlines()]
+    assert records[0]["kind"] == "folder_scan_failed"
+    assert records[0]["folder_id"] == "f1"
+    assert records[0]["folder_name"] == "NAS"
+    assert records[0]["message"] == "mount unavailable"
+    assert toasts == ["Folder scan failed: NAS"]
     window.close()
 
 

@@ -55,10 +55,15 @@ class FolderScanner:
     def scan_once(self) -> None:
         refreshed: list[VideoItem] = []
         counts: dict[str, int] = {}
+        errors: dict[str, str] = {}
         for folder in self.folders:
             if not folder.live:
                 continue
-            current = set(_iter_video_files(folder.path))
+            try:
+                current = set(_iter_video_files(folder.path))
+            except OSError as exc:
+                errors[folder.id] = str(exc) or exc.__class__.__name__
+                continue
             folder.count = len(current)
             counts[folder.id] = len(current)
             refreshed.extend(VideoItem.from_path(path, index=len(refreshed)) for path in sorted(current))
@@ -68,7 +73,7 @@ class FolderScanner:
                 for idx, path in enumerate(added):
                     self.on_added(VideoItem.from_path(path, index=int(time.time()) + idx))
         if self.on_refreshed is not None:
-            self.on_refreshed({"videos": refreshed, "folder_counts": counts})
+            self.on_refreshed({"videos": refreshed, "folder_counts": counts, "folder_errors": errors})
 
     def _run(self) -> None:
         if self._stop.wait(self.initial_delay_seconds):

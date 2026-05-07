@@ -949,6 +949,7 @@ class MainWindow(QMainWindow):
         self._sync_ui()
 
     def _folder_scan_refreshed(self, payload: dict[str, object]) -> None:
+        self._handle_folder_scan_errors(payload)
         scanned = [video for video in payload.get("videos", []) if isinstance(video, VideoItem)]
         folder_counts = payload.get("folder_counts", {})
         counts = folder_counts if isinstance(folder_counts, dict) else {}
@@ -992,6 +993,26 @@ class MainWindow(QMainWindow):
             self._sync_ui()
         elif counts_changed:
             self._sync_ui()
+
+    def _handle_folder_scan_errors(self, payload: dict[str, object]) -> None:
+        raw_errors = payload.get("folder_errors", {})
+        if not isinstance(raw_errors, dict):
+            return
+        for folder_id, message in raw_errors.items():
+            folder = next((item for item in self.state.folders if item.id == str(folder_id)), None)
+            if not folder:
+                continue
+            error_message = str(message).strip() or "Scan failed"
+            self.store.append_playback_diagnostic(
+                {
+                    "kind": "folder_scan_failed",
+                    "folder_id": folder.id,
+                    "folder_name": folder.name,
+                    "path": folder.path,
+                    "message": error_message,
+                }
+            )
+            self._toast(f"Folder scan failed: {folder.name}")
 
     def _clear_video_cells(self, video_ids: set[str]) -> None:
         self.state.cell_content = [

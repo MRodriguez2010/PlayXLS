@@ -13,7 +13,11 @@ cd /home/ai-agents/Projects/PlayXLS
 .venv/bin/playxls
 ```
 
-The latest slice added preview/library performance certification, persisted Sources/stage splitter sizing, custom-layout delete affordances, browser source-list compatibility notices, richer QtWebEngine load-failure messages, cached watched-folder startup loading, the large-NAS startup fix, the XCB launch preference for embedded mpv playback, Pluto playback-limited warnings, repeat/shuffle auto-advance for finished local videos, visible mpv load-failure diagnostics for local video cells, and a recovery safe-mode launch path for bypassing watched folders.
+The latest slice added preview/library performance certification, persisted Sources/stage splitter sizing, custom-layout delete affordances, browser source-list compatibility notices, richer QtWebEngine load-failure messages, cached watched-folder startup loading, the large-NAS startup fix, the XCB launch preference for embedded mpv playback, Pluto playback-limited warnings, repeat/shuffle auto-advance for finished local videos, visible mpv load-failure diagnostics for local video cells, a recovery safe-mode launch path for bypassing watched folders, and watched-folder scan failure logging.
+
+## Latest Folder Scan Diagnostics
+
+Background watched-folder scans now catch per-folder `OSError` failures and include them in the scanner refresh payload as `folder_errors`. The main window records those failures to the diagnostics JSONL file with `kind="folder_scan_failed"` and shows a toast with the folder name. This keeps one bad or unavailable NAS mount from killing the scanner thread silently.
 
 ## Latest Safe Mode
 
@@ -186,7 +190,8 @@ Results:
 - Focused app/config diagnostics-export tests: `14 passed in 0.21s`
 - Focused app/video playback-probe tests: `19 passed in 0.22s`
 - Focused startup/app safe-mode tests: `13 passed in 0.21s`
-- Full suite: `128 passed in 4.62s`
+- Focused folder/main-window scan failure diagnostics tests: `29 passed in 2.51s`
+- Full suite: `130 passed in 4.78s`
 - `compiled 22 Python source files`
 - Diagnostics found `/snap/bin/mpv`, PySide6, QtWebEngine, `libxcb-cursor.so.0`, and now selects Qt platform `xcb`.
 - Diagnostics export smoke wrote `/tmp/playxls-diagnostics-smoke.zip` with `diagnose.txt` and `manifest.json`; the watched-library cache index was excluded.
