@@ -1071,11 +1071,11 @@ class MainWindow(QMainWindow):
         return normalize_combo("+".join(pieces))
 
 
-def build_state(cli_paths: list[str], store: ConfigStore) -> tuple[AppState, list[LayoutDefinition]]:
+def build_state(cli_paths: list[str], store: ConfigStore, *, load_watch_folders: bool = True) -> tuple[AppState, list[LayoutDefinition]]:
     state = AppState()
     state.settings = store.load_settings()
     state.bindings = store.load_bindings()
-    state.folders = _prune_missing_prototype_folders(store.load_watch_folders())
+    state.folders = _prune_missing_prototype_folders(store.load_watch_folders()) if load_watch_folders else []
     state.browser_presets = store.load_browser_presets()
     state.ignored_video_paths = store.load_ignored_video_paths()
     layouts = preset_layouts() + store.load_layouts()

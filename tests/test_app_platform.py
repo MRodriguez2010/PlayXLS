@@ -1,7 +1,7 @@
 import json
 import zipfile
 
-from playxls.app import QtLaunchDecision, choose_qt_platform, main
+from playxls.app import QtLaunchDecision, build_parser, choose_qt_platform, main
 from playxls.config import ConfigStore
 from playxls.video import VideoProbeResult
 
@@ -98,3 +98,9 @@ def test_probe_video_cli_reports_failure_without_starting_gui(monkeypatch, capsy
     output = capsys.readouterr().out
     assert "Playback probe: FAILED" in output
     assert "No playable streams" in output
+
+
+def test_parser_accepts_safe_mode_for_recovery_launches():
+    args = build_parser().parse_args(["--safe-mode"])
+
+    assert args.safe_mode is True

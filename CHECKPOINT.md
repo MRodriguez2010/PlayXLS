@@ -9,10 +9,15 @@ PlayXLS is a Python 3.12 + PySide6/Qt 6 native desktop app. It runs from the pro
 ```bash
 cd /home/ai-agents/Projects/PlayXLS
 .venv/bin/playxls --diagnose
+.venv/bin/playxls --safe-mode
 .venv/bin/playxls
 ```
 
-The latest slice added preview/library performance certification, persisted Sources/stage splitter sizing, custom-layout delete affordances, browser source-list compatibility notices, richer QtWebEngine load-failure messages, cached watched-folder startup loading, the large-NAS startup fix, the XCB launch preference for embedded mpv playback, Pluto playback-limited warnings, repeat/shuffle auto-advance for finished local videos, and visible mpv load-failure diagnostics for local video cells.
+The latest slice added preview/library performance certification, persisted Sources/stage splitter sizing, custom-layout delete affordances, browser source-list compatibility notices, richer QtWebEngine load-failure messages, cached watched-folder startup loading, the large-NAS startup fix, the XCB launch preference for embedded mpv playback, Pluto playback-limited warnings, repeat/shuffle auto-advance for finished local videos, visible mpv load-failure diagnostics for local video cells, and a recovery safe-mode launch path for bypassing watched folders.
+
+## Latest Safe Mode
+
+The GUI now supports `playxls --safe-mode`. It launches with saved settings, browser presets, and session layout, but skips watched-folder config loading, cached watched-library loading, and background folder scanning for that run. Saved watched-folder config is not modified. Video cells from the saved session are cleared because the watched library is intentionally unavailable, while browser cells can remain.
 
 ## Latest Diagnostics Export
 
@@ -180,11 +185,13 @@ Results:
 - Focused video/playback/main-window transport tests after adding mpv shutdown escalation: `42 passed in 2.50s`
 - Focused app/config diagnostics-export tests: `14 passed in 0.21s`
 - Focused app/video playback-probe tests: `19 passed in 0.22s`
-- Full suite: `126 passed in 4.64s`
+- Focused startup/app safe-mode tests: `13 passed in 0.21s`
+- Full suite: `128 passed in 4.62s`
 - `compiled 22 Python source files`
 - Diagnostics found `/snap/bin/mpv`, PySide6, QtWebEngine, `libxcb-cursor.so.0`, and now selects Qt platform `xcb`.
 - Diagnostics export smoke wrote `/tmp/playxls-diagnostics-smoke.zip` with `diagnose.txt` and `manifest.json`; the watched-library cache index was excluded.
 - Playback probe smoke against a harmless missing file returned exit status `1` and surfaced mpv's missing-file diagnostic.
+- Safe-mode startup smoke against the active config launched with `folders=0`, `videos=0`, and no folder scanner.
 - Valid local-file smoke: `MpvController.load()` returned true, kept `last_error=''`, and detected a `21.48s` duration.
 - Invalid-source smoke: `MpvController.load()` returned false with a cleaned unsupported-protocol mpv diagnostic.
 - Cached `build_state()` smoke: `videos=5923 folders=[('01_Main Collection', 4336), ('Taboos', 1587)]`, elapsed `0:01.34`.

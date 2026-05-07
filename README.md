@@ -25,6 +25,12 @@ To check whether mpv can decode a local video or URL without launching the GUI:
 .venv/bin/playxls --probe-video ~/Videos/foo.mp4
 ```
 
+If a watched folder or NAS path is causing startup trouble, launch once without watched-folder loading or scanning:
+
+```bash
+.venv/bin/playxls --safe-mode
+```
+
 ## What Works In This Build
 
 - Native title/sidebar/toolbar/stage/transport shell matching the supplied prototype structure.
@@ -37,6 +43,7 @@ To check whether mpv can decode a local video or URL without launching the GUI:
 - Library, folders, and browser source tabs.
 - Remove actions for library videos, watched folders, and browser sources.
 - Cached watched-folder startup index under `~/.cache/playxls/library_index.toml`; background scans refresh the index after launch.
+- Recovery safe mode for launching without watched-folder cache loading or background folder scanning.
 - Library folder filters so watched folder videos can be isolated quickly.
 - Large library rendering is bounded to the first 200 matching rows with an explicit show-more action, avoiding thousands of startup widgets for NAS folders.
 - Lazy hover previews in library rows through a bounded mpv LRU preview pool.

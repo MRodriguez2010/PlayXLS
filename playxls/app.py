@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write a PlayXLS diagnostics zip and exit. Defaults to the PlayXLS state directory.",
     )
     parser.add_argument("--probe-video", metavar="SOURCE", help="Probe a local video or URL with mpv without launching the GUI.")
+    parser.add_argument("--safe-mode", action="store_true", help="Launch without watched-folder cache loading or background folder scanning.")
     parser.add_argument("--version", action="version", version=f"PlayXLS {__version__}")
     return parser
 
@@ -85,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     icon_path = app_icon_path()
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
-    state, layouts = build_state(args.videos, store)
+    state, layouts = build_state(args.videos, store, load_watch_folders=not args.safe_mode)
     window = MainWindow(state, layouts, store)
     window.show()
     return app.exec()
