@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import ctypes.util
+import json
 import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Mapping
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from playxls import __version__
 from playxls.config import ConfigStore
@@ -24,6 +27,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="playxls", description="PlayXLS native multi-stream video player.")
     parser.add_argument("videos", nargs="*", help="Video files or stream URLs to load at startup.")
     parser.add_argument("--diagnose", action="store_true", help="Print local dependency diagnostics and exit.")
+    parser.add_argument(
+        "--export-diagnostics",
+        nargs="?",
+        const="",
+        metavar="ZIP",
+        help="Write a PlayXLS diagnostics zip and exit. Defaults to the PlayXLS state directory.",
+    )
     parser.add_argument("--version", action="version", version=f"PlayXLS {__version__}")
     return parser
 
@@ -34,6 +44,11 @@ def main(argv: list[str] | None = None) -> int:
     store.ensure_dirs()
     if args.diagnose:
         return diagnose(store)
+    if args.export_diagnostics is not None:
+        output = Path(args.export_diagnostics).expanduser() if args.export_diagnostics else None
+        bundle = export_diagnostics(store, output)
+        print(f"Diagnostics exported: {bundle}")
+        return 0
 
     decision = choose_qt_platform(os.environ)
     if not decision.ok:
@@ -106,32 +121,79 @@ def choose_qt_platform(
 
 
 def diagnose(store: ConfigStore) -> int:
-    print(f"PlayXLS {__version__}")
-    print(f"config: {store.config_dir}")
-    print(f"cache:  {store.cache_dir}")
-    print(f"state:  {store.state_dir}")
-    print(f"mpv:    {find_executable('mpv') or 'missing'}")
-    print(f"streamlink: {find_executable('streamlink') or 'missing'}")
-    print(f"yt-dlp:     {find_executable('yt-dlp') or 'missing'}")
-    print(f"xcb-cursor: {ctypes.util.find_library('xcb-cursor') or 'missing'}")
-    print(f"wayland-client: {ctypes.util.find_library('wayland-client') or 'missing'}")
+    print(diagnostics_report(store))
+    return 0
+
+
+def diagnostics_report(store: ConfigStore) -> str:
+    lines = [
+        f"PlayXLS {__version__}",
+        f"config: {store.config_dir}",
+        f"cache:  {store.cache_dir}",
+        f"state:  {store.state_dir}",
+        f"mpv:    {find_executable('mpv') or 'missing'}",
+        f"streamlink: {find_executable('streamlink') or 'missing'}",
+        f"yt-dlp:     {find_executable('yt-dlp') or 'missing'}",
+        f"xcb-cursor: {ctypes.util.find_library('xcb-cursor') or 'missing'}",
+        f"wayland-client: {ctypes.util.find_library('wayland-client') or 'missing'}",
+    ]
     decision = choose_qt_platform(os.environ)
-    print(f"Qt platform: {decision.platform or 'unavailable'}")
+    lines.append(f"Qt platform: {decision.platform or 'unavailable'}")
     if not decision.ok:
-        print(decision.message)
+        lines.append(decision.message)
     try:
         import PySide6  # noqa: F401
 
-        print("PySide6: installed")
+        lines.append("PySide6: installed")
     except ModuleNotFoundError:
-        print("PySide6: missing")
+        lines.append("PySide6: missing")
     try:
         import PySide6.QtWebEngineWidgets  # noqa: F401
 
-        print("QtWebEngine: installed")
+        lines.append("QtWebEngine: installed")
     except ModuleNotFoundError:
-        print("QtWebEngine: missing")
-    return 0
+        lines.append("QtWebEngine: missing")
+    return "\n".join(lines) + "\n"
+
+
+def export_diagnostics(store: ConfigStore, output_path: Path | None = None) -> Path:
+    store.ensure_dirs()
+    target = output_path or _default_diagnostics_bundle_path(store)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "version": __version__,
+        "config_dir": str(store.config_dir),
+        "cache_dir": str(store.cache_dir),
+        "state_dir": str(store.state_dir),
+        "notes": "Cache indexes and browser profile data are intentionally excluded.",
+    }
+    with ZipFile(target, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        archive.writestr("diagnose.txt", diagnostics_report(store))
+        for path, archive_name in _diagnostics_file_map(store):
+            if path.exists() and path.is_file():
+                archive.write(path, archive_name)
+    return target
+
+
+def _default_diagnostics_bundle_path(store: ConfigStore) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return store.state_dir / f"playxls-diagnostics-{stamp}.zip"
+
+
+def _diagnostics_file_map(store: ConfigStore) -> list[tuple[Path, str]]:
+    return [
+        (store.settings_path, "config/settings.toml"),
+        (store.layouts_path, "config/layouts.toml"),
+        (store.bindings_path, "config/bindings.toml"),
+        (store.watch_folders_path, "config/watch_folders.toml"),
+        (store.browser_presets_path, "config/browser_presets.toml"),
+        (store.ignored_videos_path, "config/ignored_videos.toml"),
+        (store.session_path, "config/sessions/default.toml"),
+        (store.log_path, "state/playxls.log"),
+        (store.playback_diagnostics_path, "state/playback-diagnostics.jsonl"),
+    ]
 
 
 if __name__ == "__main__":

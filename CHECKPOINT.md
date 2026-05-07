@@ -14,6 +14,10 @@ cd /home/ai-agents/Projects/PlayXLS
 
 The latest slice added preview/library performance certification, persisted Sources/stage splitter sizing, custom-layout delete affordances, browser source-list compatibility notices, richer QtWebEngine load-failure messages, cached watched-folder startup loading, the large-NAS startup fix, the XCB launch preference for embedded mpv playback, Pluto playback-limited warnings, repeat/shuffle auto-advance for finished local videos, and visible mpv load-failure diagnostics for local video cells.
 
+## Latest Diagnostics Export
+
+The CLI now supports `playxls --export-diagnostics [ZIP]`. It exits before any GUI startup, writes a zip bundle containing `diagnose.txt`, `manifest.json`, selected TOML config/session files, `playxls.log` when present, and `playback-diagnostics.jsonl` when present. It intentionally excludes cache indexes and browser profile data so the bundle stays small and avoids dumping the full watched-library cache.
+
 ## Latest MPV Diagnostics
 
 Local-video assignment no longer treats creation of the mpv IPC socket as proof that playback loaded. `MpvController` now captures mpv's combined stdout/stderr tail, keeps loader diagnostics available with `--msg-level=all=warn`, and waits for actual loaded media state (`path` or `duration`) before reporting success. If mpv reaches idle after a loader error, PlayXLS treats that as a failed load and stores a cleaned `last_error` instead of leaving the cell in a broken-looking playback state.
@@ -170,9 +174,11 @@ Results:
 - Focused diagnostics/playback/browser transport tests: `53 passed in 2.72s`
 - Focused config/playback/video/main-window transport tests after adding persistent playback diagnostics: `50 passed in 2.59s`
 - Focused video/playback/main-window transport tests after adding mpv shutdown escalation: `42 passed in 2.50s`
-- Full suite: `121 passed in 4.71s`
+- Focused app/config diagnostics-export tests: `14 passed in 0.21s`
+- Full suite: `122 passed in 4.65s`
 - `compiled 22 Python source files`
 - Diagnostics found `/snap/bin/mpv`, PySide6, QtWebEngine, `libxcb-cursor.so.0`, and now selects Qt platform `xcb`.
+- Diagnostics export smoke wrote `/tmp/playxls-diagnostics-smoke.zip` with `diagnose.txt` and `manifest.json`; the watched-library cache index was excluded.
 - Valid local-file smoke: `MpvController.load()` returned true, kept `last_error=''`, and detected a `21.48s` duration.
 - Invalid-source smoke: `MpvController.load()` returned false with a cleaned unsupported-protocol mpv diagnostic.
 - Cached `build_state()` smoke: `videos=5923 folders=[('01_Main Collection', 4336), ('Taboos', 1587)]`, elapsed `0:01.34`.

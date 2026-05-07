@@ -13,6 +13,12 @@ python3 -m venv .venv
 
 Without file arguments, PlayXLS opens the persisted session and scans configured watch folders. With one to four file arguments, it chooses Single, 1 x 2, 1 + 2 stack, or 2 x 2 automatically. Five or more files start in 3 x 3.
 
+To collect dependency output, config files, and playback failure logs without launching the GUI:
+
+```bash
+.venv/bin/playxls --export-diagnostics ~/playxls-diagnostics.zip
+```
+
 ## What Works In This Build
 
 - Native title/sidebar/toolbar/stage/transport shell matching the supplied prototype structure.
@@ -35,6 +41,7 @@ Without file arguments, PlayXLS opens the persisted session and scans configured
 - mpv subprocess shutdown escalates from quit to terminate to kill so failed local-video loads cannot leave stuck child processes behind.
 - Local-video load failures now surface mpv diagnostics in the cell and toast instead of failing silently.
 - Local-video load failures are also appended to `~/.local/state/playxls/playback-diagnostics.jsonl` for post-run debugging.
+- Diagnostics can be exported from the CLI before GUI startup; cache indexes and browser profile data are intentionally excluded.
 - QtWebEngine browser cells when the PySide6 WebEngine wheel is present.
 - Shared QtWebEngine browser profile by default with one reused `QWebEngineProfile` and persistent storage/cache under `~/.cache/playxls/browser/shared/`.
 - Advanced setting to switch browser cells between shared login/cookie storage and isolated per-cell profiles under `~/.cache/playxls/browser/cell-N/`.
