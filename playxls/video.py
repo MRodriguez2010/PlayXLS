@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes.util
+import importlib
 import json
 import os
 import socket
@@ -24,12 +26,7 @@ class VideoProbeResult:
 
 
 class MpvController:
-    """Small mpv subprocess adapter.
-
-    The production target is libmpv. This adapter keeps the rest of the app on
-    the same control surface while the local development image lacks libmpv
-    headers.
-    """
+    """Small mpv subprocess fallback adapter."""
 
     def __init__(self, window_id: int | None = None, ipc_dir: Path | None = None) -> None:
         self.window_id = window_id
@@ -228,6 +225,132 @@ class MpvController:
         self.stop()
 
 
+class LibMpvController:
+    """Direct libmpv adapter using the python-mpv binding."""
+
+    def __init__(self, window_id: int | None = None, mpv_module: Any | None = None) -> None:
+        self.window_id = window_id
+        self.mpv_module = mpv_module
+        self.player: Any | None = None
+        self.last_error = ""
+        self._output_tail: list[str] = []
+
+    @property
+    def available(self) -> bool:
+        return self._module() is not None
+
+    def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60, audio_normalize: bool = False) -> bool:
+        self.last_error = ""
+        self._output_tail = []
+        module = self._module()
+        if module is None:
+            self.last_error = "libmpv Python binding not available"
+            return False
+        self.stop()
+        try:
+            self.player = module.MPV(
+                log_handler=self._record_log_message,
+                loglevel="warn",
+                **build_libmpv_options(self.window_id, audio_normalize=audio_normalize),
+            )
+            self.player.volume = max(0, min(100, int(volume)))
+            self.set_loop_file(loop)
+            self.set_pause(paused)
+            self.player.loadfile(source)
+        except Exception as exc:
+            self.last_error = _exception_message(exc)
+            self.stop()
+            return False
+        return self._wait_for_load_result(time.monotonic() + 3.0)
+
+    def get_property(self, name: str) -> Any | None:
+        if not self.player:
+            return None
+        return _safe_getattr(self.player, name.replace("-", "_"))
+
+    def transport_snapshot(self) -> TransportSnapshot:
+        return TransportSnapshot(
+            position=_float_or_none(self.get_property("time-pos")),
+            duration=_float_or_none(self.get_property("duration")),
+            paused=bool(self.get_property("pause")),
+            eof_reached=_bool_or_false(self.get_property("eof-reached")),
+        )
+
+    def seek_absolute(self, seconds: float) -> None:
+        if self.player:
+            self.player.command("seek", max(0.0, float(seconds)), "absolute+exact")
+
+    def set_volume(self, volume: float) -> None:
+        if self.player:
+            self.player.volume = max(0, min(100, int(volume * 100)))
+
+    def set_pause(self, paused: bool) -> None:
+        if self.player:
+            self.player.pause = bool(paused)
+
+    def set_loop_file(self, enabled: bool) -> None:
+        if self.player:
+            self.player.loop_file = "inf" if enabled else "no"
+
+    def stop(self) -> None:
+        player = self.player
+        self.player = None
+        if player:
+            try:
+                player.terminate()
+            except Exception:
+                pass
+
+    def _module(self) -> Any | None:
+        if self.mpv_module is not None:
+            return self.mpv_module
+        self.mpv_module = _import_libmpv_module()
+        return self.mpv_module
+
+    def _wait_for_load_result(self, deadline: float) -> bool:
+        while time.monotonic() < deadline:
+            if not self.player:
+                self.last_error = self._failure_message("libmpv stopped before playback started")
+                return False
+            if self.get_property("path") not in (None, ""):
+                return True
+            if self.get_property("duration") not in (None, ""):
+                return True
+            if self.get_property("core-idle") is True and self._output_tail:
+                self.last_error = self._failure_message("libmpv did not start playback")
+                self.stop()
+                return False
+            time.sleep(0.05)
+        self.last_error = self._failure_message("Timed out waiting for libmpv playback")
+        self.stop()
+        return False
+
+    def _record_log_message(self, level: str, prefix: str, text: str) -> None:
+        line = text.strip()
+        if not line or _is_noisy_output_line(line):
+            return
+        self._output_tail.append(line)
+        del self._output_tail[:-80]
+
+    def _failure_message(self, fallback: str) -> str:
+        if not self._output_tail:
+            return fallback
+        return "\n".join(self._output_tail[-6:])
+
+    def __del__(self) -> None:
+        self.stop()
+
+
+def libmpv_available() -> bool:
+    return ctypes.util.find_library("mpv") is not None and _import_libmpv_module() is not None
+
+
+def preferred_mpv_controller(window_id: int | None = None):
+    if os.environ.get("QT_QPA_PLATFORM") != "offscreen" and libmpv_available():
+        return LibMpvController(window_id=window_id)
+    return MpvController(window_id=window_id)
+
+
 def resolve_stream_url(url: str) -> str:
     """Resolve stream URLs through available CLI helpers when possible."""
 
@@ -327,6 +450,31 @@ def build_mpv_args(
     return args
 
 
+def build_libmpv_options(window_id: int | None, *, audio_normalize: bool = False) -> dict[str, Any]:
+    options: dict[str, Any] = {
+        "force_window": "yes",
+        "idle": "yes",
+        "osc": "no",
+        "osd_level": 0,
+        "input_default_bindings": "no",
+        "cache": "yes",
+        "demuxer_max_bytes": "256MiB",
+        "demuxer_readahead_secs": 20,
+        "hwdec": "auto-safe",
+        "scale": "bilinear",
+        "dscale": "bilinear",
+        "cscale": "bilinear",
+        "correct_downscaling": "no",
+        "linear_downscaling": "no",
+        "cursor_autohide": "always",
+    }
+    if window_id is not None:
+        options["wid"] = window_id
+    if audio_normalize:
+        options["af"] = "lavfi=[dynaudnorm=f=150:g=15]"
+    return options
+
+
 def default_mpv_ipc_dir(mpv_path: str | None) -> Path:
     if mpv_path and Path(mpv_path).as_posix().startswith("/snap/"):
         return Path.home() / "PlayXLS Runtime" / "mpv-ipc"
@@ -365,6 +513,25 @@ def _clean_probe_output(output: str) -> str:
         if line and not _is_noisy_output_line(line):
             lines.append(line)
     return "\n".join(lines[-6:])
+
+
+def _import_libmpv_module() -> Any | None:
+    try:
+        return importlib.import_module("mpv")
+    except (ImportError, OSError):
+        return None
+
+
+def _safe_getattr(obj: Any, name: str) -> Any | None:
+    try:
+        return getattr(obj, name)
+    except Exception:
+        return None
+
+
+def _exception_message(exc: Exception) -> str:
+    message = str(exc).strip()
+    return message or exc.__class__.__name__
 
 
 def _timeout_output(exc: subprocess.TimeoutExpired) -> str:

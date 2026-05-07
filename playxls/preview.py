@@ -4,7 +4,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Callable
 
-from playxls.video import MpvController
+from playxls.video import MpvController, preferred_mpv_controller
 
 
 @dataclass(slots=True)
@@ -17,7 +17,7 @@ class PreviewEntry:
 class PreviewPool:
     """Small LRU pool for muted library hover previews."""
 
-    def __init__(self, max_size: int = 5, mpv_factory: Callable[..., MpvController] = MpvController) -> None:
+    def __init__(self, max_size: int = 5, mpv_factory: Callable[..., MpvController] = preferred_mpv_controller) -> None:
         self.max_size = max(0, int(max_size))
         self.mpv_factory = mpv_factory
         self._entries: OrderedDict[str, PreviewEntry] = OrderedDict()

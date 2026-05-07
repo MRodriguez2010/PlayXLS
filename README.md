@@ -50,16 +50,16 @@ If a watched folder or NAS path is causing startup trouble, launch once without 
 - Lazy hover previews in library rows through a bounded mpv LRU preview pool.
 - Static thumbnail mode avoids native thumbnail windows and does not touch the live preview pool during row rebuilds.
 - Drag/drop local video files into the window to add and assign them to empty visible cells.
-- mpv subprocess adapter for local video cells when `mpv` is installed.
+- Direct libmpv adapter for local video cells and hover previews when `libmpv` plus `python-mpv` are available, with the older mpv subprocess adapter kept as fallback.
 - GUI-free `--probe-video` command to test whether mpv can decode a local file or URL before debugging embedded playback.
-- Embedded mpv cells launch with mpv OSC/OSD/default bindings disabled so local-video controls stay in the app-level transport and do not interfere with hover expansion.
-- Embedded mpv cells launch with cache/readahead, safe hardware decode, and faster downscale filters to reduce HD/NAS playback pressure in small cells.
+- Embedded mpv/libmpv cells launch with mpv OSC/OSD/default bindings disabled so local-video controls stay in the app-level transport and do not interfere with hover expansion.
+- Embedded mpv/libmpv cells launch with cache/readahead, safe hardware decode, and faster downscale filters to reduce HD/NAS playback pressure in small cells.
 - Optional local-video audio normalization is available in Playback settings.
 - mpv subprocess shutdown escalates from quit to terminate to kill so failed local-video loads cannot leave stuck child processes behind.
 - Local-video load failures now surface mpv diagnostics in the cell and toast instead of failing silently.
 - Local-video load failures are also appended to `~/.local/state/playxls/playback-diagnostics.jsonl` for post-run debugging.
 - Diagnostics can be exported from the CLI before GUI startup; cache indexes and browser profile data are intentionally excluded.
-- `playxls --diagnose` and the in-app Diagnostics dialog report `libmpv` availability and tail the playback diagnostics log.
+- `playxls --diagnose` and the in-app Diagnostics dialog report `libmpv` availability, selected video backend, and tail the playback diagnostics log.
 - QtWebEngine browser cells when the PySide6 WebEngine wheel is present.
 - Shared QtWebEngine browser profile by default with one reused `QWebEngineProfile` and persistent storage/cache under `~/.cache/playxls/browser/shared/`.
 - Advanced setting to switch browser cells between shared login/cookie storage and isolated per-cell profiles under `~/.cache/playxls/browser/cell-N/`.
@@ -92,7 +92,7 @@ python -m compileall playxls
 
 ## Native Dependency Notes
 
-This machine currently has `/snap/bin/mpv` but does not expose GTK4/libmpv development headers or a loadable `libmpv`. The app therefore uses an mpv subprocess embedding adapter for the first runnable native slice. That adapter embeds with mpv's X11-style `--wid`, so PlayXLS prefers Qt's `xcb` backend when it is available, including on Wayland desktops with XWayland. See `MIGRATION_FROM_PROTOTYPE.md` for remaining native gaps and the migration path to libmpv/WebKitGTK/Flatpak.
+PlayXLS now prefers direct libmpv through the `python-mpv` binding when `libmpv` is loadable. If the binding or system library is missing, it falls back to the mpv subprocess adapter. Both current backends embed through mpv's X11-style `wid` path, so PlayXLS still prefers Qt's `xcb` backend when it is available, including on Wayland desktops with XWayland. See `MIGRATION_FROM_PROTOTYPE.md` for remaining native gaps and the path toward lower-level libmpv render API integration/WebKitGTK/Flatpak.
 
 Development is currently Ubuntu-first. The finished app should also be usable on macOS and Windows, so platform-specific integration should stay isolated behind adapters. Packaging is intentionally the final build phase after backend, browser, and performance behavior are settled.
 

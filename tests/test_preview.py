@@ -1,4 +1,11 @@
+import playxls.video as video_module
 from playxls.preview import PreviewPool
+
+
+def test_preview_pool_prefers_configured_mpv_controller_factory():
+    pool = PreviewPool(max_size=2)
+
+    assert pool.mpv_factory is video_module.preferred_mpv_controller
 
 
 def test_preview_pool_starts_muted_looping_preview():

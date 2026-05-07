@@ -12,7 +12,7 @@ from playxls.browser import BrowserFullscreenBridge, browser_load_failure_messag
 from playxls.models import AppSettings, CellContent, VideoItem
 from playxls.theme import Theme
 from playxls.ui.widgets import MonoLabel, animate_geometry
-from playxls.video import MpvController
+from playxls.video import MpvController, preferred_mpv_controller
 
 try:
     from PySide6.QtWebEngineCore import QWebEngineLoadingInfo, QWebEnginePage, QWebEngineProfile
@@ -218,7 +218,7 @@ class CellWidget(QFrame):
     browser_load_failed = Signal(int, str)
     browser_load_succeeded = Signal(int)
     video_load_failed = Signal(int, str)
-    mpv_factory = MpvController
+    mpv_factory = preferred_mpv_controller
 
     def __init__(self, index: int, theme: Theme, cache_dir: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)

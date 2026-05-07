@@ -15,6 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 gui = [
   "PySide6>=6.7",
+  "python-mpv>=1.0.8",
 ]
 watch = [
   "watchdog>=4.0",

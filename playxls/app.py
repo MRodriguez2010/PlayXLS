@@ -14,7 +14,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from playxls import __version__
 from playxls.config import ConfigStore
 from playxls.runtime import find_executable
-from playxls.video import VideoProbeResult, probe_video_playback
+from playxls.video import VideoProbeResult, libmpv_available, probe_video_playback
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +140,7 @@ def diagnostics_report(store: ConfigStore) -> str:
         f"state:  {store.state_dir}",
         f"mpv:    {find_executable('mpv') or 'missing'}",
         f"libmpv: {ctypes.util.find_library('mpv') or 'missing'}",
+        f"video backend: {'libmpv' if libmpv_available() else 'mpv subprocess'}",
         f"streamlink: {find_executable('streamlink') or 'missing'}",
         f"yt-dlp:     {find_executable('yt-dlp') or 'missing'}",
         f"xcb-cursor: {ctypes.util.find_library('xcb-cursor') or 'missing'}",

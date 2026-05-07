@@ -72,6 +72,15 @@ def test_export_diagnostics_writes_zip_without_starting_gui(monkeypatch, tmp_pat
         assert playback_records[0]["message"] == "BadWindow"
 
 
+def test_diagnostics_report_names_selected_video_backend(monkeypatch, tmp_path):
+    from playxls.app import diagnostics_report
+
+    monkeypatch.setattr("playxls.app.libmpv_available", lambda: True)
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+
+    assert "video backend: libmpv" in diagnostics_report(store)
+
+
 def test_probe_video_cli_reports_success_without_starting_gui(monkeypatch, capsys):
     monkeypatch.setattr(
         "playxls.app.probe_video_playback",

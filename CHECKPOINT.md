@@ -13,7 +13,17 @@ cd /home/ai-agents/Projects/PlayXLS
 .venv/bin/playxls
 ```
 
-The latest slice added preview/library performance certification, persisted Sources/stage splitter sizing, custom-layout delete affordances, browser source-list compatibility notices, richer QtWebEngine load-failure messages, cached watched-folder startup loading, the large-NAS startup fix, the XCB launch preference for embedded mpv playback, Pluto playback-limited warnings, repeat/shuffle auto-advance for finished local videos, visible mpv load-failure diagnostics for local video cells, a recovery safe-mode launch path for bypassing watched folders, watched-folder scan failure logging, symbolic transport controls, unified local-video timeline heads, HD/NAS playback tuning, optional audio normalization, browser volume best-effort control, and an in-app Diagnostics dialog.
+The latest slice added preview/library performance certification, persisted Sources/stage splitter sizing, custom-layout delete affordances, browser source-list compatibility notices, richer QtWebEngine load-failure messages, cached watched-folder startup loading, the large-NAS startup fix, the XCB launch preference for embedded mpv playback, Pluto playback-limited warnings, repeat/shuffle auto-advance for finished local videos, visible mpv load-failure diagnostics for local video cells, a recovery safe-mode launch path for bypassing watched folders, watched-folder scan failure logging, symbolic transport controls, unified local-video timeline heads, HD/NAS playback tuning, optional audio normalization, browser volume best-effort control, an in-app Diagnostics dialog, and the first direct libmpv backend.
+
+## Latest Libmpv Backend
+
+The local environment now has `/usr/bin/mpv`, `libmpv.so.2`, and the `python-mpv` binding. PlayXLS now exposes `LibMpvController`, a direct libmpv adapter with the same control surface as the existing subprocess backend: `load`, `stop`, `set_pause`, `set_volume`, `seek_absolute`, `set_loop_file`, and `transport_snapshot`.
+
+`preferred_mpv_controller()` selects `LibMpvController` when `libmpv` and `python-mpv` are available, otherwise it falls back to the existing `MpvController` subprocess adapter. Local-video cells and the hover preview pool now use this preferred factory by default.
+
+The libmpv adapter carries over the current playback tuning: disabled mpv OSC/OSD/default bindings, cache/readahead, `hwdec=auto-safe`, bilinear scaling/downscaling, optional `dynaudnorm`, and `wid` embedding into the Qt native child window. This is direct libmpv control, but it is still the `wid` rendering path rather than the lower-level libmpv render API.
+
+`playxls --diagnose` now includes `video backend: libmpv` when the preferred backend is active.
 
 ## Latest Transport And Playback Tuning
 
@@ -25,9 +35,7 @@ Embedded mpv launches now include cache/readahead, `hwdec=auto-safe`, and faster
 
 Browser cells now respond to app mute/unmute through QtWebEngine's page mute API and also run a small JavaScript hook to set standard `video`/`audio` element volume when the site permits it. Sites that isolate media in cross-origin frames or custom players may still ignore proportional volume changes.
 
-The app toolbar now includes an in-app Diagnostics button. It shows the same dependency report as `playxls --diagnose`, including `libmpv`, and tails `~/.local/state/playxls/playback-diagnostics.jsonl`.
-
-Direct libmpv migration is not complete on this machine. `ctypes.util.find_library("mpv")` currently returns missing, so the active backend remains the subprocess mpv adapter until a loadable system `libmpv` and Python binding path are installed.
+The app toolbar now includes an in-app Diagnostics button. It shows the same dependency report as `playxls --diagnose`, including `libmpv` and the selected video backend, and tails `~/.local/state/playxls/playback-diagnostics.jsonl`.
 
 ## Latest Folder Scan Diagnostics
 
@@ -69,7 +77,7 @@ The main Sources/stage splitter now persists through the existing session file. 
 
 User reported that browser playback from YouTube worked, but assigning a NAS watched-folder video never played and then caused UI flicker. Direct mpv probing showed the NAS file was readable and playable when mpv was not embedded. A Qt Wayland embed probe reproduced the real failure: passing a Qt Wayland native window id to mpv's current `--wid` subprocess backend made mpv exit with `BadWindow` before playback.
 
-Fix: `choose_qt_platform()` now prefers Qt's `xcb` backend whenever a `DISPLAY` is available and `libxcb-cursor0` is installed, including on Wayland desktops with XWayland. Explicit `QT_QPA_PLATFORM` still wins. This keeps the current subprocess-mpv backend on the X11/XWayland surface model it requires until the project moves to direct libmpv or another native backend.
+Fix: `choose_qt_platform()` now prefers Qt's `xcb` backend whenever a `DISPLAY` is available and `libxcb-cursor0` is installed, including on Wayland desktops with XWayland. Explicit `QT_QPA_PLATFORM` still wins. This keeps the current libmpv/subprocess `wid` embedding path on the X11/XWayland surface model it requires until the project moves to a lower-level render API or another native backend.
 
 Validation: a temporary XCB PlayXLS smoke assigned one cached NAS video to a 1x1 grid. mpv stayed alive, exposed an IPC socket, and transport snapshots advanced from about `0.06s` to `1.89s` with a detected duration of about `473s`.
 
@@ -207,9 +215,11 @@ Results:
 - Focused app/video playback-probe tests: `19 passed in 0.22s`
 - Focused startup/app safe-mode tests: `13 passed in 0.21s`
 - Focused folder/main-window scan failure diagnostics tests: `29 passed in 2.51s`
-- Full suite: `140 passed in 5.24s`
+- Focused libmpv/backend/playback tests: `34 passed in 0.45s`
+- Full suite after libmpv migration: `149 passed in 4.63s`
 - `compiled 22 Python source files`
-- Diagnostics found `/snap/bin/mpv`, PySide6, QtWebEngine, `libxcb-cursor.so.0`, `libmpv: missing`, and now selects Qt platform `xcb`.
+- Diagnostics found `/usr/bin/mpv`, PySide6, QtWebEngine, `libxcb-cursor.so.0`, `libmpv: libmpv.so.2`, `video backend: libmpv`, and now selects Qt platform `xcb`.
+- Xvfb libmpv smoke generated `/tmp/playxls-libmpv-smoke.mp4`; `preferred_mpv_controller()` selected `LibMpvController`, loaded successfully, kept `last_error=''`, and detected duration `1.0`.
 - Diagnostics export smoke wrote `/tmp/playxls-diagnostics-smoke.zip` with `diagnose.txt` and `manifest.json`; the watched-library cache index was excluded.
 - Playback probe smoke against a harmless missing file returned exit status `1` and surfaced mpv's missing-file diagnostic.
 - Safe-mode startup smoke against the active config launched with `folders=0`, `videos=0`, and no folder scanner.
@@ -228,5 +238,5 @@ Results:
 
 1. Run full test suite after any follow-up code edits.
 2. Continue interactive site-by-site validation for login, fullscreen, and protected playback where credentials/playback access are available.
-3. Decide whether the next backend milestone is hardening the subprocess-mpv adapter or beginning the direct libmpv migration.
+3. Validate direct libmpv against real NAS HD files and decide whether the next backend milestone is keeping `wid` embedding or moving to libmpv's lower-level render API.
 4. Continue watching the new playback diagnostics log during real NAS playback tests and use it to decide whether failures are codec/container issues, embed/window issues, or backend crashes.

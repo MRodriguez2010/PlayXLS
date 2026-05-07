@@ -104,6 +104,119 @@ def test_embedded_mpv_args_can_enable_audio_normalization(tmp_path: Path):
     assert any(arg.startswith("--af=lavfi=") and "dynaudnorm" in arg for arg in args)
 
 
+def test_preferred_mpv_controller_uses_libmpv_when_available(monkeypatch):
+    created = []
+
+    class FakeLibController:
+        def __init__(self, window_id=None) -> None:
+            created.append(window_id)
+
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    monkeypatch.setattr(video_module, "libmpv_available", lambda: True)
+    monkeypatch.setattr(video_module, "LibMpvController", FakeLibController)
+
+    controller = video_module.preferred_mpv_controller(window_id=456)
+
+    assert isinstance(controller, FakeLibController)
+    assert created == [456]
+
+
+def test_preferred_mpv_controller_falls_back_to_subprocess_when_libmpv_missing(monkeypatch):
+    created = []
+
+    class FakeSubprocessController:
+        def __init__(self, window_id=None) -> None:
+            created.append(window_id)
+
+    monkeypatch.setattr(video_module, "libmpv_available", lambda: False)
+    monkeypatch.setattr(video_module, "MpvController", FakeSubprocessController)
+
+    controller = video_module.preferred_mpv_controller(window_id=789)
+
+    assert isinstance(controller, FakeSubprocessController)
+    assert created == [789]
+
+
+def test_preferred_mpv_controller_falls_back_to_subprocess_for_offscreen_qt(monkeypatch):
+    created = []
+
+    class FakeSubprocessController:
+        def __init__(self, window_id=None) -> None:
+            created.append(window_id)
+
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(video_module, "libmpv_available", lambda: True)
+    monkeypatch.setattr(video_module, "MpvController", FakeSubprocessController)
+
+    controller = video_module.preferred_mpv_controller(window_id=222)
+
+    assert isinstance(controller, FakeSubprocessController)
+    assert created == [222]
+
+
+def test_libmpv_controller_load_configures_player_and_waits_for_media():
+    module = _FakeMpvModule()
+    controller = video_module.LibMpvController(window_id=123, mpv_module=module)
+
+    loaded = controller.load("movie.mp4", paused=True, loop=True, volume=42, audio_normalize=True)
+
+    assert loaded is True
+    player = module.instances[0]
+    assert player.options["wid"] == 123
+    assert player.options["force_window"] == "yes"
+    assert player.options["idle"] == "yes"
+    assert player.options["osc"] == "no"
+    assert player.options["osd_level"] == 0
+    assert player.options["input_default_bindings"] == "no"
+    assert player.options["cache"] == "yes"
+    assert player.options["demuxer_readahead_secs"] == 20
+    assert player.options["hwdec"] == "auto-safe"
+    assert player.options["af"] == "lavfi=[dynaudnorm=f=150:g=15]"
+    assert player.loaded == ["movie.mp4"]
+    assert player.pause is True
+    assert player.loop_file == "inf"
+    assert player.volume == 42
+
+
+def test_libmpv_controller_exposes_transport_and_controls():
+    module = _FakeMpvModule()
+    controller = video_module.LibMpvController(window_id=123, mpv_module=module)
+    assert controller.load("movie.mp4") is True
+    player = module.instances[0]
+    player.time_pos = 5.5
+    player.duration = 30
+    player.pause = False
+    player.eof_reached = True
+
+    snapshot = controller.transport_snapshot()
+    controller.seek_absolute(12.25)
+    controller.set_volume(0.75)
+    controller.set_pause(True)
+    controller.set_loop_file(False)
+    controller.stop()
+
+    assert snapshot.position == 5.5
+    assert snapshot.duration == 30
+    assert snapshot.paused is False
+    assert snapshot.eof_reached is True
+    assert player.commands == [("seek", 12.25, "absolute+exact")]
+    assert player.volume == 75
+    assert player.pause is True
+    assert player.loop_file == "no"
+    assert player.terminated is True
+
+
+def test_libmpv_controller_reports_load_failure_from_logs():
+    module = _FakeMpvModule(fail_load=True)
+    controller = video_module.LibMpvController(window_id=123, mpv_module=module)
+
+    loaded = controller.load("broken://movie")
+
+    assert loaded is False
+    assert "No protocol handler found" in controller.last_error
+    assert module.instances[0].terminated is True
+
+
 def test_mpv_controller_captures_output_when_load_exits_before_ipc(monkeypatch, tmp_path: Path):
     popen_calls = []
 
@@ -297,3 +410,51 @@ class _StubbornProcess:
 
     def kill(self):
         self.kill_calls += 1
+
+
+class _FakeMpvModule:
+    def __init__(self, *, fail_load: bool = False) -> None:
+        self.fail_load = fail_load
+        self.instances = []
+
+    def MPV(self, *flags, log_handler=None, loglevel=None, **options):
+        player = _FakeLibMpvPlayer(flags, options, log_handler, loglevel, fail_load=self.fail_load)
+        self.instances.append(player)
+        return player
+
+
+class _FakeLibMpvPlayer:
+    def __init__(self, flags, options, log_handler, loglevel, *, fail_load: bool) -> None:
+        self.flags = flags
+        self.options = options
+        self.log_handler = log_handler
+        self.loglevel = loglevel
+        self.fail_load = fail_load
+        self.loaded = []
+        self.commands = []
+        self.path = None
+        self.duration = None
+        self.time_pos = None
+        self.pause = False
+        self.eof_reached = False
+        self.core_idle = True
+        self.volume = None
+        self.loop_file = "no"
+        self.terminated = False
+
+    def loadfile(self, source):
+        self.loaded.append(source)
+        if self.fail_load:
+            if self.log_handler:
+                self.log_handler("warn", "cplayer", "No protocol handler found")
+            self.core_idle = True
+            return
+        self.path = source
+        self.duration = 10
+        self.core_idle = False
+
+    def command(self, *args):
+        self.commands.append(args)
+
+    def terminate(self):
+        self.terminated = True

@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from pathlib import Path
 
+import playxls.video as video_module
 from PySide6.QtWidgets import QApplication
 
 from playxls.config import ConfigStore
@@ -14,6 +15,10 @@ from playxls.theme import THEMES
 from playxls.transport import TransportSnapshot
 from playxls.ui.grid import CellWidget
 from playxls.ui.main_window import MainWindow, build_state
+
+
+def test_video_cells_prefer_configured_mpv_controller_factory():
+    assert CellWidget.mpv_factory is video_module.preferred_mpv_controller
 
 
 def test_session_round_trip_preserves_playback_positions(tmp_path: Path):
