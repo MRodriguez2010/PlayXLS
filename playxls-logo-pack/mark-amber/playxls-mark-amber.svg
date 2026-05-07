@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 220" width="220" height="220" role="img" aria-label="PlayXLS">
+  <title>PlayXLS</title>
+  <defs>
+    <clipPath id="c"><rect x="0" y="0" width="220" height="220" rx="44"/></clipPath>
+  </defs>
+  <g clip-path="url(#c)">
+    <rect x="0" y="0" width="220" height="220" fill="#fbbf24"/>
+    <rect x="14" y="14" width="118" height="192" rx="14" fill="#0a0a0c"/>
+    <rect x="138" y="14" width="68" height="92" rx="14" fill="#0a0a0c" fill-opacity="0.18"/>
+    <path d="M 50 76 L 50 144 L 100 110 Z" fill="#fbbf24" stroke="#fbbf24" stroke-width="14" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="172" cy="42" r="5" fill="#0a0a0c" opacity="0.7"/>
+  </g>
+</svg>
