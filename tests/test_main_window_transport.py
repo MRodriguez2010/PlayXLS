@@ -202,6 +202,37 @@ def test_browser_toolbar_opens_active_browser_cell_in_system_browser(tmp_path: P
     window.close()
 
 
+def test_browser_toolbar_prefers_load_failure_notice_for_active_cell(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    window = MainWindow(AppState(), preset_layouts(), store)
+    window.grid.cells = [_Cell(kind="browser", index=0, web_view=_WebView("https://netflix.com"), url="https://netflix.com")]
+
+    assert callable(getattr(window, "_browser_load_failed", None))
+    window._browser_load_failed(0, "Load failed")
+
+    assert window.browser_notice.isHidden() is False
+    assert window.browser_notice.text() == "Load failed"
+    assert "system browser" in window.browser_notice.toolTip()
+    window.grid.cells = []
+    window.close()
+
+
+def test_browser_toolbar_clears_load_failure_after_successful_cell_load(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    window = MainWindow(AppState(), preset_layouts(), store)
+    window.grid.cells = [_Cell(kind="browser", index=0, web_view=_WebView("https://example.com"), url="https://example.com")]
+
+    window._browser_load_failed(0, "Load failed")
+    assert callable(getattr(window, "_browser_load_succeeded", None))
+    window._browser_load_succeeded(0)
+
+    assert window.browser_notice.isHidden() is True
+    window.grid.cells = []
+    window.close()
+
+
 class _Content:
     def __init__(self, kind: str, url: str = "") -> None:
         self.kind = kind

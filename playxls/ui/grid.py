@@ -31,6 +31,8 @@ class GridStage(QFrame):
     fullscreen_changed = Signal(object)
     cell_cleared = Signal(int)
     browser_url_changed = Signal(int, str)
+    browser_load_failed = Signal(int, str)
+    browser_load_succeeded = Signal(int)
 
     def __init__(self, theme: Theme, cache_dir: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -80,6 +82,8 @@ class GridStage(QFrame):
             cell.fullscreen_requested.connect(self.toggle_fullscreen)
             cell.clear_requested.connect(self._clear_cell)
             cell.browser_url_changed.connect(self.browser_url_changed.emit)
+            cell.browser_load_failed.connect(self.browser_load_failed.emit)
+            cell.browser_load_succeeded.connect(self.browser_load_succeeded.emit)
             self.cells.append(cell)
         for index, cell in enumerate(self.cells):
             cell.setVisible(index < len(rects))
@@ -206,6 +210,8 @@ class CellWidget(QFrame):
     fullscreen_requested = Signal(int)
     clear_requested = Signal(int)
     browser_url_changed = Signal(int, str)
+    browser_load_failed = Signal(int, str)
+    browser_load_succeeded = Signal(int)
     mpv_factory = MpvController
 
     def __init__(self, index: int, theme: Theme, cache_dir: Path, parent: QWidget | None = None) -> None:
@@ -371,6 +377,7 @@ class CellWidget(QFrame):
             page.settings().setAttribute(page.settings().WebAttribute.FullScreenSupportEnabled, True)
             page.fullScreenRequested.connect(self.browser_fullscreen_bridge.handle)
             page.urlChanged.connect(lambda url: self.browser_url_changed.emit(self.index, url.toString()))
+            view.loadFinished.connect(self._browser_load_finished)
             view.setUrl(QUrl(normalize_browser_url(content.url)))
             view.show()
             self._layout_browser_widgets()
@@ -451,3 +458,9 @@ class CellWidget(QFrame):
         self.browser_page_fullscreen = active
         self._layout_browser_widgets()
         self._position_overlays()
+
+    def _browser_load_finished(self, ok: bool) -> None:
+        if ok:
+            self.browser_load_succeeded.emit(self.index)
+            return
+        self.browser_load_failed.emit(self.index, "Load failed")

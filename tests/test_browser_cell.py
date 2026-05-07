@@ -141,3 +141,18 @@ def test_browser_page_fullscreen_stays_inside_cell(tmp_path: Path):
     assert fullscreen_requests == []
     assert cell.browser_page_fullscreen is False
     cell._clear_body()
+
+
+def test_browser_cell_reports_failed_page_load(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    cell = CellWidget(1, THEMES["dark"], tmp_path)
+    failures = []
+    assert hasattr(cell, "browser_load_failed")
+    cell.browser_load_failed.connect(lambda index, message: failures.append((index, message)))
+    cell.set_content(CellContent.browser("https://example.invalid", "Broken"), None, AppSettings())
+
+    assert callable(getattr(cell, "_browser_load_finished", None))
+    cell._browser_load_finished(False)
+
+    assert failures == [(1, "Load failed")]
+    cell._clear_body()

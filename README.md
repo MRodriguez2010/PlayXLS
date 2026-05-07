@@ -35,6 +35,7 @@ Without file arguments, PlayXLS opens the persisted session and scans configured
 - Browser cell back/forward/reload buttons and editable URL bar.
 - Browser toolbar compatibility notice for DRM-heavy services whose protected video may not play inside QtWebEngine.
 - Browser toolbar handoff to open the active browser cell URL in the system browser for sites that block embedded playback or login.
+- Browser load failures from QtWebEngine are surfaced in the app-level toolbar with the system-browser handoff still available.
 - Compact fixed-height browser cell toolbar for small cells.
 - Live bottom transport for the active video cell, including mpv-backed position, duration, play/pause state, and seek slider.
 - Playback position persistence/resume when the setting is enabled.

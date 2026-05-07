@@ -51,6 +51,7 @@ class MainWindow(QMainWindow):
         self.theme = resolve_theme(state.settings.theme)
         self.hovered_cell: int | None = None
         self.active_browser_cell: int | None = None
+        self.browser_load_failures: dict[int, str] = {}
         self.seek_user_active = False
         self.resume_after_minimize = False
         self.border_visible = state.settings.border_mode == "always"
@@ -113,6 +114,8 @@ class MainWindow(QMainWindow):
         self.grid.fullscreen_changed.connect(lambda _: self._sync_ui())
         self.grid.cell_cleared.connect(self._clear_cell)
         self.grid.browser_url_changed.connect(self._browser_url_changed)
+        self.grid.browser_load_failed.connect(self._browser_load_failed)
+        self.grid.browser_load_succeeded.connect(self._browser_load_succeeded)
         stage_inner.addWidget(self.grid, 1)
         stage_layout.addWidget(self.stage_frame, 1)
         self.transport = self._transport()
@@ -506,12 +509,14 @@ class MainWindow(QMainWindow):
         self._refresh_transport()
 
     def _assign_video(self, video_id: str, index: int) -> None:
+        self.browser_load_failures.pop(index, None)
         self.state.cell_content[index] = CellContent.video(video_id)
         self._toast(f"→ Cell {index + 1}")
         self._save_session()
         self._sync_ui()
 
     def _assign_browser(self, preset: BrowserPreset, index: int) -> None:
+        self.browser_load_failures.pop(index, None)
         self.state.cell_content[index] = CellContent.browser(preset.url, preset.name)
         self._toast(f"{preset.name} → Cell {index + 1}")
         self._save_session()
@@ -542,6 +547,7 @@ class MainWindow(QMainWindow):
         self._sync_ui()
 
     def _clear_cell(self, index: int) -> None:
+        self.browser_load_failures.pop(index, None)
         self.state.cell_content[index] = CellContent.empty()
         self._toast(f"Cleared {index + 1}")
         self._save_session()
@@ -601,8 +607,13 @@ class MainWindow(QMainWindow):
         self.browser_url.blockSignals(True)
         self.browser_url.setText(url)
         self.browser_url.blockSignals(False)
-        notice = browser_compatibility_notice(getattr(getattr(cell, "content", None), "url", "") or url)
-        if notice:
+        failure = self.browser_load_failures.get(cell.index)
+        notice = None if failure else browser_compatibility_notice(getattr(getattr(cell, "content", None), "url", "") or url)
+        if failure:
+            self.browser_notice.setText(failure)
+            self.browser_notice.setToolTip("This page failed to load in the embedded browser. Try opening it in the system browser.")
+            self.browser_notice.show()
+        elif notice:
             self.browser_notice.setText(notice.label)
             self.browser_notice.setToolTip(notice.detail)
             self.browser_notice.show()
@@ -641,6 +652,16 @@ class MainWindow(QMainWindow):
         if not raw_url:
             return
         self.open_external_url(QUrl(normalize_browser_url(raw_url)))
+
+    def _browser_load_failed(self, index: int, message: str) -> None:
+        self.browser_load_failures[index] = message or "Load failed"
+        if self._browser_control_cell_index() == index:
+            self._sync_browser_toolbar()
+
+    def _browser_load_succeeded(self, index: int) -> None:
+        self.browser_load_failures.pop(index, None)
+        if self._browser_control_cell_index() == index:
+            self._sync_browser_toolbar()
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self.theme, self.state.settings, self.state.bindings, self)
