@@ -28,6 +28,7 @@ Without file arguments, PlayXLS opens the persisted session and scans configured
 - Lazy hover previews in library rows through a bounded mpv LRU preview pool.
 - Drag/drop local video files into the window to add and assign them to empty visible cells.
 - mpv subprocess adapter for local video cells when `mpv` is installed.
+- Embedded mpv cells launch with mpv OSC/OSD/default bindings disabled so local-video controls stay in the app-level transport and do not interfere with hover expansion.
 - QtWebEngine browser cells when the PySide6 WebEngine wheel is present.
 - Shared QtWebEngine browser profile by default with one reused `QWebEngineProfile` and persistent storage/cache under `~/.cache/playxls/browser/shared/`.
 - Advanced setting to switch browser cells between shared login/cookie storage and isolated per-cell profiles under `~/.cache/playxls/browser/cell-N/`.
@@ -38,6 +39,7 @@ Without file arguments, PlayXLS opens the persisted session and scans configured
 - Browser load failures from QtWebEngine are surfaced in the app-level toolbar with the system-browser handoff still available.
 - Compact fixed-height browser cell toolbar for small cells.
 - Live bottom transport for the active video cell, including mpv-backed position, duration, play/pause state, and seek slider.
+- App-level repeat and shuffle transport controls with persisted state; `repeat 1` also toggles mpv single-file looping for active local-video processes.
 - Playback position persistence/resume when the setting is enabled.
 - Pause-on-minimize with resume only when playback was active before minimize.
 - Hover expand, hover-volume calculations, border modes, and cell-confined fullscreen.

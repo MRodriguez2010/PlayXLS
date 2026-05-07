@@ -11,6 +11,7 @@ HoverVolumeMode = Literal["boost", "duck"]
 PreviewMode = Literal["off", "lazy", "thumb"]
 SeekSyncMode = Literal["disabled", "soft", "hard"]
 BrowserProfileScope = Literal["shared", "per_cell"]
+RepeatMode = Literal["none", "one", "all", "folder"]
 
 
 VIDEO_EXTENSIONS = {
@@ -182,6 +183,8 @@ class SessionState:
     cell_content: list[CellContent] = field(default_factory=lambda: [CellContent.empty() for _ in range(20)])
     master_volume: float = 0.6
     muted: bool = False
+    repeat_mode: RepeatMode = "none"
+    shuffle: bool = False
     playback_positions: dict[str, float] = field(default_factory=dict)
 
     @classmethod
@@ -211,6 +214,8 @@ class SessionState:
             cell_content=cells,
             master_volume=max(0.0, min(1.0, master_volume)),
             muted=bool(data.get("muted", False)),
+            repeat_mode=_coerce_repeat_mode(data.get("repeat_mode")),
+            shuffle=bool(data.get("shuffle", False)),
             playback_positions=playback_positions,
         )
 
@@ -220,6 +225,8 @@ class SessionState:
             "cell_content": [content.to_dict() for content in self.cell_content],
             "master_volume": self.master_volume,
             "muted": self.muted,
+            "repeat_mode": self.repeat_mode,
+            "shuffle": self.shuffle,
             "playback_positions": self.playback_positions,
         }
 
@@ -238,6 +245,8 @@ class AppState:
     playing: bool = True
     master_volume: float = 0.6
     muted: bool = False
+    repeat_mode: RepeatMode = "none"
+    shuffle: bool = False
 
     def ensure_cell_capacity(self, count: int) -> None:
         if len(self.cell_content) < count:
@@ -249,6 +258,8 @@ class AppState:
         self.ensure_cell_capacity(20)
         self.master_volume = session.master_volume
         self.muted = session.muted
+        self.repeat_mode = session.repeat_mode
+        self.shuffle = session.shuffle
         self.playback_positions = dict(session.playback_positions)
 
     def to_session(self) -> SessionState:
@@ -257,6 +268,8 @@ class AppState:
             cell_content=list(self.cell_content),
             master_volume=self.master_volume,
             muted=self.muted,
+            repeat_mode=self.repeat_mode,
+            shuffle=self.shuffle,
             playback_positions=dict(self.playback_positions),
         )
 
@@ -307,3 +320,10 @@ def _clamp_int(value: Any, low: int, high: int) -> int:
     except (TypeError, ValueError):
         number = low
     return max(low, min(high, number))
+
+
+def _coerce_repeat_mode(value: Any) -> RepeatMode:
+    mode = str(value or "none")
+    if mode in {"none", "one", "all", "folder"}:
+        return mode  # type: ignore[return-value]
+    return "none"

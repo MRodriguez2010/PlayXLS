@@ -37,6 +37,22 @@ The same toolbar now includes an external-open handoff button for the active bro
 
 QtWebEngine load failures now flow from `CellWidget` to `GridStage` to `MainWindow`. When the active browser cell reports `loadFinished(False)`, the toolbar shows `Load failed` with a tooltip pointing users to the system-browser handoff. A later successful load clears the failure state, and failure notices take priority over generic DRM-limited notices.
 
+## Latest Transport Hardening
+
+Local-video cells no longer expose mpv's own OSC/OSD/default input bindings inside each embedded cell. `MpvController` now builds subprocess args with `--osc=no`, `--osd-level=0`, and `--input-default-bindings=no`, keeping playback controls in PlayXLS' app-level transport and reducing hover-expansion interference.
+
+The app-level transport now includes repeat and shuffle controls with persisted session state:
+
+- `repeat off`
+- `repeat 1`
+- `repeat all`
+- `repeat folder`
+- `shuffle off/on`
+
+`repeat 1` also pushes `loop-file=inf` to running local mpv instances; other repeat/shuffle modes are now represented in state/UI and are ready for the next queue/folder auto-advance slice.
+
+User manually confirmed that shared browser login persists across cells, and browser-video fullscreen is correctly confined to the cell.
+
 ## Verification
 
 Latest full verification:
@@ -56,15 +72,16 @@ PY
 
 Results:
 
-- Browser/config/settings focused tests: `37 passed in 1.92s`
-- Full suite: `76 passed in 2.92s`
+- Transport/config focused tests: `26 passed in 1.87s`
+- Full suite: `80 passed in 2.90s`
 - `compiled 21 Python source files`
 - Diagnostics found `/snap/bin/mpv`, PySide6, and QtWebEngine.
 - X11 screenshot validation saved `/tmp/playxls-browser-grid.png`, `/tmp/playxls-browser-drm-notice.png`, and `/tmp/playxls-browser-external-button.png`; the app-level toolbar was visible, selected browser cells rendered, and the `DRM limited` notice plus external-open button fit without crowding the URL field.
+- Transport screenshot validation saved `/tmp/playxls-transport-repeat-shuffle.png`; repeat/shuffle controls fit at `960x620`.
 
 ## Next Steps
 
 1. Run full test suite after any follow-up edits.
-2. Manually validate YouTube/Twitch browser cells with shared-profile cookies and page fullscreen.
+2. Implement queue/folder auto-advance semantics for repeat all, repeat folder, and shuffle.
 3. Decide whether browser limitation notices should also appear in the Sources browser list, not only the active toolbar.
 4. Capture richer site-specific QtWebEngine failure details if Qt exposes useful error codes beyond `loadFinished(False)`.

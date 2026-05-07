@@ -36,21 +36,15 @@ class MpvController:
         if not self.available:
             return False
         self.stop()
-        args = [
+        args = build_mpv_args(
             self.mpv_path or "mpv",
-            "--no-terminal",
-            "--force-window=yes",
-            "--idle=yes",
-            f"--input-ipc-server={self.ipc_path}",
-            f"--volume={volume}",
-        ]
-        if self.window_id is not None:
-            args.append(f"--wid={self.window_id}")
-        if paused:
-            args.append("--pause")
-        if loop:
-            args.append("--loop-file=inf")
-        args.append(source)
+            source,
+            ipc_path=self.ipc_path,
+            window_id=self.window_id,
+            paused=paused,
+            loop=loop,
+            volume=volume,
+        )
         self.process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
         return self._wait_for_socket()
 
@@ -112,6 +106,9 @@ class MpvController:
     def set_pause(self, paused: bool) -> None:
         self.command(["set_property", "pause", paused])
 
+    def set_loop_file(self, enabled: bool) -> None:
+        self.command(["set_property", "loop-file", "inf" if enabled else "no"])
+
     def stop(self) -> None:
         if self.process and self.process.poll() is None:
             self.command(["quit"])
@@ -162,6 +159,38 @@ def resolve_stream_url(url: str) -> str:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, IndexError):
             pass
     return url
+
+
+def build_mpv_args(
+    mpv_path: str,
+    source: str,
+    *,
+    ipc_path: Path,
+    window_id: int | None,
+    paused: bool,
+    loop: bool,
+    volume: int,
+) -> list[str]:
+    args = [
+        mpv_path,
+        "--no-terminal",
+        "--force-window=yes",
+        "--idle=yes",
+        "--osc=no",
+        "--osd-level=0",
+        "--input-default-bindings=no",
+        "--cursor-autohide=always",
+        f"--input-ipc-server={ipc_path}",
+        f"--volume={volume}",
+    ]
+    if window_id is not None:
+        args.append(f"--wid={window_id}")
+    if paused:
+        args.append("--pause")
+    if loop:
+        args.append("--loop-file=inf")
+    args.append(source)
+    return args
 
 
 def default_mpv_ipc_dir(mpv_path: str | None) -> Path:

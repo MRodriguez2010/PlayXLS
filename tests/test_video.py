@@ -3,6 +3,7 @@ import json
 import socket
 import threading
 
+import playxls.video as video_module
 from playxls.video import MpvController, default_mpv_ipc_dir
 
 
@@ -32,6 +33,25 @@ def test_mpv_controller_reads_first_ipc_response_line(tmp_path: Path):
     )
 
     assert response == {"error": "success", "data": 12}
+
+
+def test_embedded_mpv_args_disable_per_cell_ui(tmp_path: Path):
+    assert callable(getattr(video_module, "build_mpv_args", None))
+
+    args = video_module.build_mpv_args(
+        "mpv",
+        "movie.mp4",
+        ipc_path=tmp_path / "mpv.sock",
+        window_id=123,
+        paused=False,
+        loop=False,
+        volume=60,
+    )
+
+    assert "--osc=no" in args
+    assert "--osd-level=0" in args
+    assert "--input-default-bindings=no" in args
+    assert "--wid=123" in args
 
 
 def controller_response(tmp_path: Path, response_payload: bytes):

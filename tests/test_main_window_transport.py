@@ -233,6 +233,42 @@ def test_browser_toolbar_clears_load_failure_after_successful_cell_load(tmp_path
     window.close()
 
 
+def test_transport_repeat_button_cycles_modes_and_persists(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    window = MainWindow(state, preset_layouts(), store)
+
+    assert callable(getattr(window, "_cycle_repeat_mode", None))
+    window._cycle_repeat_mode()
+    assert state.repeat_mode == "one"
+    assert window.repeat_button.text() == "repeat 1"
+
+    window._cycle_repeat_mode()
+    assert state.repeat_mode == "all"
+    assert window.repeat_button.text() == "repeat all"
+
+    window._cycle_repeat_mode()
+    assert state.repeat_mode == "folder"
+    assert store.load_session().repeat_mode == "folder"
+    window.close()
+
+
+def test_transport_shuffle_button_toggles_and_persists(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    window = MainWindow(state, preset_layouts(), store)
+
+    assert callable(getattr(window, "_toggle_shuffle", None))
+    window._toggle_shuffle()
+
+    assert state.shuffle is True
+    assert window.shuffle_button.text() == "shuffle on"
+    assert store.load_session().shuffle is True
+    window.close()
+
+
 class _Content:
     def __init__(self, kind: str, url: str = "") -> None:
         self.kind = kind

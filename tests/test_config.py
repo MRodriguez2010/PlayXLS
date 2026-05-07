@@ -76,3 +76,14 @@ def test_session_round_trip_preserves_layout_and_cells(tmp_path: Path):
     assert loaded.cell_content[2] == CellContent.empty()
     assert loaded.master_volume == 0.45
     assert loaded.muted is True
+
+
+def test_session_round_trip_preserves_repeat_and_shuffle(tmp_path: Path):
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    session = SessionState(repeat_mode="folder", shuffle=True)
+
+    store.save_session(session)
+    loaded = store.load_session()
+
+    assert loaded.repeat_mode == "folder"
+    assert loaded.shuffle is True

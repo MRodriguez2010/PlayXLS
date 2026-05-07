@@ -297,6 +297,16 @@ class MainWindow(QMainWindow):
         self.volume.setValue(int(self.state.master_volume * 100))
         self.volume.valueChanged.connect(self._set_master_volume)
         layout.addWidget(self.volume)
+        self.repeat_button = QPushButton("")
+        self.repeat_button.setFixedWidth(86)
+        self.repeat_button.setToolTip("Repeat mode")
+        self.repeat_button.clicked.connect(self._cycle_repeat_mode)
+        layout.addWidget(self.repeat_button)
+        self.shuffle_button = QPushButton("")
+        self.shuffle_button.setFixedWidth(86)
+        self.shuffle_button.setToolTip("Shuffle")
+        self.shuffle_button.clicked.connect(self._toggle_shuffle)
+        layout.addWidget(self.shuffle_button)
         self.time_left = MonoLabel("--:--")
         self.time_right = MonoLabel("--:--")
         layout.addWidget(self.time_left)
@@ -334,6 +344,8 @@ class MainWindow(QMainWindow):
         self.hover_button.setChecked(hover_active)
         self.play_button.setText("Ⅱ" if self.state.playing else "▶")
         self.mute_button.setText("🔇" if self.state.muted else "🔊")
+        self.repeat_button.setText(self._repeat_button_label())
+        self.shuffle_button.setText("shuffle on" if self.state.shuffle else "shuffle off")
         self.sources.set_data(
             self.state.library_videos,
             self.state.folders,
@@ -352,6 +364,7 @@ class MainWindow(QMainWindow):
         )
         self.grid.set_playing(self.state.playing)
         self.grid.set_volume_state(self.state.master_volume, self.state.muted)
+        self._apply_repeat_mode_to_cells()
         self._sync_browser_toolbar()
 
     def _current_layout(self) -> LayoutDefinition:
@@ -426,6 +439,36 @@ class MainWindow(QMainWindow):
         self._save_session()
         self._toast("Muted" if self.state.muted else "Unmuted")
         self._sync_ui()
+
+    def _cycle_repeat_mode(self) -> None:
+        modes = ["none", "one", "all", "folder"]
+        index = modes.index(self.state.repeat_mode) if self.state.repeat_mode in modes else 0
+        self.state.repeat_mode = modes[(index + 1) % len(modes)]
+        self._apply_repeat_mode_to_cells()
+        self._save_session()
+        self._toast(self._repeat_button_label())
+        self._sync_ui()
+
+    def _toggle_shuffle(self) -> None:
+        self.state.shuffle = not self.state.shuffle
+        self._save_session()
+        self._toast("Shuffle on" if self.state.shuffle else "Shuffle off")
+        self._sync_ui()
+
+    def _repeat_button_label(self) -> str:
+        return {
+            "none": "repeat off",
+            "one": "repeat 1",
+            "all": "repeat all",
+            "folder": "repeat folder",
+        }.get(self.state.repeat_mode, "repeat off")
+
+    def _apply_repeat_mode_to_cells(self) -> None:
+        loop_current_file = self.state.repeat_mode == "one"
+        for cell in self.grid.cells:
+            mpv = getattr(cell, "mpv", None)
+            if mpv and hasattr(mpv, "set_loop_file"):
+                mpv.set_loop_file(loop_current_file)
 
     def _set_master_volume(self, value: int) -> None:
         self.state.master_volume = value / 100
