@@ -137,6 +137,22 @@ def test_mpv_controller_filters_noisy_ipc_output_from_diagnostics(monkeypatch, t
     assert controller.last_error == "No protocol handler found"
 
 
+def test_mpv_controller_stop_kills_process_that_ignores_graceful_shutdown(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(video_module, "find_executable", lambda name: "/usr/bin/mpv")
+    controller = MpvController(ipc_dir=tmp_path)
+    process = _StubbornProcess()
+    controller.process = process
+    controller.ipc_path.touch()
+
+    controller.stop()
+
+    assert process.terminate_calls == 1
+    assert process.kill_calls == 1
+    assert process.wait_timeouts == [0.5, 0.5, 0.5]
+    assert controller.process is None
+    assert not controller.ipc_path.exists()
+
+
 def controller_response(tmp_path: Path, response_payload: bytes):
     ipc_path = tmp_path / "mpv.sock"
     received: list[dict] = []
@@ -174,3 +190,23 @@ class _RunningProcess:
 
     def terminate(self):
         return None
+
+
+class _StubbornProcess:
+    def __init__(self) -> None:
+        self.terminate_calls = 0
+        self.kill_calls = 0
+        self.wait_timeouts = []
+
+    def poll(self):
+        return None
+
+    def wait(self, timeout=None):
+        self.wait_timeouts.append(timeout)
+        raise video_module.subprocess.TimeoutExpired(cmd="mpv", timeout=timeout)
+
+    def terminate(self):
+        self.terminate_calls += 1
+
+    def kill(self):
+        self.kill_calls += 1

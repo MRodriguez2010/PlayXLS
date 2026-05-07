@@ -20,6 +20,8 @@ Local-video assignment no longer treats creation of the mpv IPC socket as proof 
 
 Failed video cells now show `Playback failed` plus the mpv diagnostic inside the cell surface, emit `video_load_failed` through `CellWidget` and `GridStage`, and raise a toast from `MainWindow` with the affected cell number. Main window failures also append a JSONL record to `~/.local/state/playxls/playback-diagnostics.jsonl` with timestamp, cell, video id, title/source, and cleaned mpv message. Noisy shutdown lines such as mpv IPC write errors and GLib/GIO cleanup warnings are filtered out of the user-facing diagnostic.
 
+`MpvController.stop()` now uses a bounded shutdown ladder: send mpv `quit`, wait briefly, `terminate()` if needed, wait again, then `kill()` as the final escalation. This keeps failed or wedged local-video loads from leaving stuck child processes behind after the cell clears or reloads.
+
 Validation included a valid local-file smoke and an invalid-source smoke. The valid file loaded with a detected duration of about `21.48s`; the invalid source failed cleanly with mpv's unsupported-protocol diagnostic instead of appearing to load.
 
 ## Latest Performance Certification
@@ -167,7 +169,8 @@ Results:
 
 - Focused diagnostics/playback/browser transport tests: `53 passed in 2.72s`
 - Focused config/playback/video/main-window transport tests after adding persistent playback diagnostics: `50 passed in 2.59s`
-- Full suite: `120 passed in 4.79s`
+- Focused video/playback/main-window transport tests after adding mpv shutdown escalation: `42 passed in 2.50s`
+- Full suite: `121 passed in 4.71s`
 - `compiled 22 Python source files`
 - Diagnostics found `/snap/bin/mpv`, PySide6, QtWebEngine, `libxcb-cursor.so.0`, and now selects Qt platform `xcb`.
 - Valid local-file smoke: `MpvController.load()` returned true, kept `last_error=''`, and detected a `21.48s` duration.

@@ -123,12 +123,21 @@ class MpvController:
         self.command(["set_property", "loop-file", "inf" if enabled else "no"])
 
     def stop(self) -> None:
-        if self.process and self.process.poll() is None:
+        process = self.process
+        if process and process.poll() is None:
             self.command(["quit"])
             try:
-                self.process.wait(timeout=0.5)
+                process.wait(timeout=0.5)
             except subprocess.TimeoutExpired:
-                self.process.terminate()
+                process.terminate()
+                try:
+                    process.wait(timeout=0.5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    try:
+                        process.wait(timeout=0.5)
+                    except subprocess.TimeoutExpired:
+                        pass
         self._join_output_reader()
         self.process = None
         try:

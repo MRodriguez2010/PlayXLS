@@ -32,6 +32,7 @@ Without file arguments, PlayXLS opens the persisted session and scans configured
 - Drag/drop local video files into the window to add and assign them to empty visible cells.
 - mpv subprocess adapter for local video cells when `mpv` is installed.
 - Embedded mpv cells launch with mpv OSC/OSD/default bindings disabled so local-video controls stay in the app-level transport and do not interfere with hover expansion.
+- mpv subprocess shutdown escalates from quit to terminate to kill so failed local-video loads cannot leave stuck child processes behind.
 - Local-video load failures now surface mpv diagnostics in the cell and toast instead of failing silently.
 - Local-video load failures are also appended to `~/.local/state/playxls/playback-diagnostics.jsonl` for post-run debugging.
 - QtWebEngine browser cells when the PySide6 WebEngine wheel is present.
