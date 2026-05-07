@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QPushButton,
     QSlider,
     QSpinBox,
@@ -25,6 +26,33 @@ from playxls.keybindings import normalize_combo
 from playxls.models import AppSettings, KeyBinding
 from playxls.theme import Theme
 from playxls.ui.widgets import LayoutThumbnailWidget, SegmentedControl, action_button, clear_layout, make_section_label
+
+
+class DiagnosticsDialog(QDialog):
+    def __init__(self, theme: Theme, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Diagnostics")
+        self.setModal(False)
+        self.resize(820, 620)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        header = QLabel("Diagnostics")
+        header.setStyleSheet(f"font-size:16px;font-weight:600;color:{theme.text_primary};")
+        root.addWidget(header)
+        viewer = QPlainTextEdit()
+        viewer.setReadOnly(True)
+        viewer.setPlainText(text)
+        viewer.setStyleSheet(
+            f'font-family:"JetBrains Mono", monospace;'
+            f"background:{theme.surface2};color:{theme.text_primary};border:1px solid {theme.border};"
+        )
+        root.addWidget(viewer, 1)
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+        footer.addWidget(close)
+        root.addLayout(footer)
 
 
 class SettingsDialog(QDialog):
@@ -111,6 +139,7 @@ class SettingsDialog(QDialog):
             ("Pause when minimized", "pause_on_minimize"),
             ("Disable screensaver while playing", "disable_screensaver"),
             ("Resume videos where you left off", "save_playback_position"),
+            ("Normalize local-video audio", "audio_normalize"),
         ]:
             box = QCheckBox()
             box.setChecked(bool(getattr(self.settings, attr)))

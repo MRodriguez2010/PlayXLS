@@ -180,7 +180,7 @@ class GridStage(QFrame):
             cell.set_dimmed(i != index and self.settings.expand_on_hover)
             cell.set_hovered(i == index)
         self.hovered_changed.emit(index)
-        self.reposition()
+        self.reposition(animated=False)
 
     def _clear_hovered(self, index: int) -> None:
         if self.hovered_cell != index:
@@ -190,7 +190,7 @@ class GridStage(QFrame):
             cell.set_dimmed(False)
             cell.set_hovered(False)
         self.hovered_changed.emit(None)
-        self.reposition()
+        self.reposition(animated=False)
 
     def _clear_cell(self, index: int) -> None:
         self.cell_cleared.emit(index)
@@ -320,8 +320,23 @@ class CellWidget(QFrame):
             self.mpv.set_pause(not playing)
 
     def set_volume(self, volume: float) -> None:
+        volume = max(0.0, min(1.0, float(volume)))
         if self.mpv:
             self.mpv.set_volume(volume)
+        elif self.browser_page is not None:
+            muted = volume <= 0.001
+            if hasattr(self.browser_page, "setAudioMuted"):
+                self.browser_page.setAudioMuted(muted)
+            if hasattr(self.browser_page, "runJavaScript"):
+                self.browser_page.runJavaScript(
+                    "(() => {"
+                    f"const volume = {volume:.4f};"
+                    "for (const media of document.querySelectorAll('video,audio')) {"
+                    "media.volume = volume;"
+                    "media.muted = volume <= 0.001;"
+                    "}"
+                    "})();"
+                )
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
@@ -359,7 +374,7 @@ class CellWidget(QFrame):
         source_key = video.path or video.src
         self.mpv = type(self).mpv_factory(window_id=int(surface.winId()))
         if source and self.mpv.available:
-            loaded = self.mpv.load(source, paused=False, loop=False, volume=60)
+            loaded = self.mpv.load(source, paused=False, loop=False, volume=60, audio_normalize=settings.audio_normalize)
             if not loaded:
                 message = _mpv_error_message(self.mpv)
                 self.mpv.stop()

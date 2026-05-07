@@ -163,7 +163,7 @@ class FakeMpvController:
         self.loaded_source = ""
         self.seeked_seconds = None
 
-    def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60) -> bool:
+    def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60, audio_normalize: bool = False) -> bool:
         self.loaded_source = source
         return True
 
@@ -181,7 +181,7 @@ class FailingMpvController:
         self.last_error = last_error
         self.stopped = False
 
-    def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60) -> bool:
+    def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60, audio_normalize: bool = False) -> bool:
         return False
 
     def stop(self) -> None:

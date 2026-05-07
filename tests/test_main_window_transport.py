@@ -50,6 +50,21 @@ def test_main_window_uses_logo_icon_in_shell(tmp_path: Path):
     window.close()
 
 
+def test_main_window_diagnostics_text_includes_playback_log_tail(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    store.append_playback_diagnostic({"kind": "video_load_failed", "message": "BadWindow invalid Window parameter"})
+    window = MainWindow(AppState(), preset_layouts(), store)
+
+    text = window._diagnostics_text()
+
+    assert "PlayXLS" in text
+    assert "libmpv:" in text
+    assert "Playback diagnostics tail" in text
+    assert "BadWindow invalid Window parameter" in text
+    window.close()
+
+
 def test_main_window_uses_splitter_for_resizable_sources_panel(tmp_path: Path):
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
@@ -408,13 +423,14 @@ def test_transport_repeat_button_cycles_modes_and_persists(tmp_path: Path):
     window = MainWindow(state, preset_layouts(), store)
 
     assert callable(getattr(window, "_cycle_repeat_mode", None))
+    assert window.repeat_button.text() == "↻"
     window._cycle_repeat_mode()
     assert state.repeat_mode == "one"
-    assert window.repeat_button.text() == "repeat 1"
+    assert window.repeat_button.text() == "↻1"
 
     window._cycle_repeat_mode()
     assert state.repeat_mode == "all"
-    assert window.repeat_button.text() == "repeat all"
+    assert window.repeat_button.text() == "↻∞"
 
     window._cycle_repeat_mode()
     assert state.repeat_mode == "folder"
@@ -432,8 +448,75 @@ def test_transport_shuffle_button_toggles_and_persists(tmp_path: Path):
     window._toggle_shuffle()
 
     assert state.shuffle is True
-    assert window.shuffle_button.text() == "shuffle on"
+    assert window.shuffle_button.text() == "⤨"
     assert store.load_session().shuffle is True
+    window.close()
+
+
+def test_transport_next_previous_assign_adjacent_videos(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    first_path = tmp_path / "one.mp4"
+    second_path = tmp_path / "two.mp4"
+    first_path.write_bytes(b"fake")
+    second_path.write_bytes(b"fake")
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    first = VideoItem.from_path(first_path, index=1)
+    second = VideoItem.from_path(second_path, index=2)
+    state.library_videos = [first, second]
+    state.cell_content[0] = CellContent.video(first.id)
+    window = MainWindow(state, preset_layouts(), store)
+    window.grid.cells = [_PlaybackCell(0, first, TransportSnapshot(position=1, duration=10, paused=False))]
+    window._sync_ui = lambda: None
+
+    window._skip_video(1)
+    assert state.cell_content[0] == CellContent.video(second.id)
+
+    window.grid.cells = [_PlaybackCell(0, second, TransportSnapshot(position=1, duration=10, paused=False))]
+    window._skip_video(-1)
+    assert state.cell_content[0] == CellContent.video(first.id)
+    window.grid.cells = []
+    window.close()
+
+
+def test_transport_stop_pauses_and_rewinds_active_video(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    video_path = tmp_path / "one.mp4"
+    video_path.write_bytes(b"fake")
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    video = VideoItem.from_path(video_path)
+    window = MainWindow(state, preset_layouts(), store)
+    mpv = _ControllableMpv()
+    window.grid.cells = [_Cell(kind="video", index=0, mpv=mpv)]
+
+    window._stop_video()
+
+    assert state.playing is False
+    assert mpv.seeked == [0]
+    assert mpv.paused == [True]
+    window.grid.cells = []
+    window.close()
+
+
+def test_unified_timeline_tracks_all_local_video_heads(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    first = VideoItem(id="v1", title="One")
+    second = VideoItem(id="v2", title="Two")
+    store = ConfigStore(config_dir=tmp_path / "config", cache_dir=tmp_path / "cache", state_dir=tmp_path / "state")
+    state = AppState()
+    window = MainWindow(state, preset_layouts(), store)
+    window.grid.cells = [
+        _PlaybackCell(0, first, TransportSnapshot(position=60, duration=120, paused=False)),
+        _PlaybackCell(1, second, TransportSnapshot(position=30, duration=1440, paused=False)),
+        _Cell(kind="browser", index=2),
+    ]
+
+    window._refresh_transport()
+
+    assert window.timeline.duration == 1440
+    assert [(track.cell, track.position, track.duration) for track in window.timeline.tracks] == [(1, 60, 120), (2, 30, 1440)]
+    window.grid.cells = []
     window.close()
 
 
@@ -534,6 +617,21 @@ class _PlaybackMpv:
 
     def transport_snapshot(self) -> TransportSnapshot:
         return self.snapshot
+
+
+class _ControllableMpv:
+    def __init__(self) -> None:
+        self.seeked = []
+        self.paused = []
+
+    def seek_absolute(self, seconds: float) -> None:
+        self.seeked.append(seconds)
+
+    def set_pause(self, paused: bool) -> None:
+        self.paused.append(paused)
+
+    def transport_snapshot(self) -> TransportSnapshot:
+        return TransportSnapshot(position=4, duration=12, paused=False)
 
 
 class _PlaybackCell:

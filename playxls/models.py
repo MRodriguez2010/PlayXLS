@@ -40,6 +40,7 @@ class AppSettings:
     pause_on_minimize: bool = True
     disable_screensaver: bool = True
     save_playback_position: bool = True
+    audio_normalize: bool = False
     seek_sync_mode: SeekSyncMode = "disabled"
     preview_mode: PreviewMode = "lazy"
     preview_delay: int = 300

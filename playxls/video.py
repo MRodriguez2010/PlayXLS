@@ -46,7 +46,7 @@ class MpvController:
     def available(self) -> bool:
         return self.mpv_path is not None
 
-    def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60) -> bool:
+    def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60, audio_normalize: bool = False) -> bool:
         self.last_error = ""
         self._output_tail = []
         if not self.available:
@@ -61,6 +61,7 @@ class MpvController:
             paused=paused,
             loop=loop,
             volume=volume,
+            audio_normalize=audio_normalize,
         )
         try:
             self.process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -291,6 +292,7 @@ def build_mpv_args(
     paused: bool,
     loop: bool,
     volume: int,
+    audio_normalize: bool = False,
 ) -> list[str]:
     args = [
         mpv_path,
@@ -300,10 +302,21 @@ def build_mpv_args(
         "--osc=no",
         "--osd-level=0",
         "--input-default-bindings=no",
+        "--cache=yes",
+        "--demuxer-max-bytes=256MiB",
+        "--demuxer-readahead-secs=20",
+        "--hwdec=auto-safe",
+        "--scale=bilinear",
+        "--dscale=bilinear",
+        "--cscale=bilinear",
+        "--correct-downscaling=no",
+        "--linear-downscaling=no",
         "--cursor-autohide=always",
         f"--input-ipc-server={ipc_path}",
         f"--volume={volume}",
     ]
+    if audio_normalize:
+        args.append("--af=lavfi=[dynaudnorm=f=150:g=15]")
     if window_id is not None:
         args.append(f"--wid={window_id}")
     if paused:

@@ -29,3 +29,13 @@ def next_video_for_repeat(
     if current_index == -1:
         return scope[0]
     return scope[(current_index + 1) % len(scope)]
+
+
+def adjacent_video(current: VideoItem, videos: Sequence[VideoItem], *, direction: int) -> VideoItem | None:
+    if len(videos) < 2:
+        return None
+    current_index = next((index for index, video in enumerate(videos) if video.id == current.id), -1)
+    if current_index == -1:
+        return videos[0]
+    step = 1 if direction >= 0 else -1
+    return videos[(current_index + step) % len(videos)]

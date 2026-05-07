@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -17,6 +18,13 @@ from PySide6.QtWidgets import (
 
 from playxls.layout import LayoutNode, collect_cells
 from playxls.theme import Theme
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineTrack:
+    cell: int
+    position: float
+    duration: float
 
 
 def clear_layout(layout: QHBoxLayout | QVBoxLayout) -> None:
@@ -116,6 +124,51 @@ class LayoutThumbnailWidget(QWidget):
             )
             painter.fillRect(rect, self.theme.accent_bg if self.active else self.theme.surface2)
             painter.drawRoundedRect(rect, 2, 2)
+
+
+class MultiHeadTimeline(QWidget):
+    seek_requested = Signal(float)
+
+    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.theme = theme
+        self.tracks: list[TimelineTrack] = []
+        self.duration = 0.0
+        self.setMinimumHeight(30)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def set_theme(self, theme: Theme) -> None:
+        self.theme = theme
+        self.update()
+
+    def set_tracks(self, tracks: list[TimelineTrack]) -> None:
+        self.tracks = tracks
+        self.duration = max((track.duration for track in tracks if track.duration), default=0.0)
+        self.setEnabled(bool(self.duration))
+        self.update()
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if self.duration and self.width() > 0:
+            self.seek_requested.emit(max(0.0, min(1.0, event.position().x() / self.width())))
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        line_y = self.height() // 2
+        painter.setPen(QPen(QColor(self.theme.border_strong), 2))
+        painter.drawLine(4, line_y, max(4, self.width() - 4), line_y)
+        if not self.duration:
+            return
+        for track in self.tracks:
+            ratio = max(0.0, min(1.0, track.position / self.duration))
+            x = 4 + int((self.width() - 8) * ratio)
+            radius = 9
+            painter.setBrush(QColor(self.theme.accent))
+            painter.setPen(QPen(QColor(self.theme.bg), 1))
+            painter.drawEllipse(x - radius, line_y - radius, radius * 2, radius * 2)
+            painter.setPen(QColor(self.theme.on_accent))
+            painter.drawText(QRect(x - radius, line_y - radius, radius * 2, radius * 2), Qt.AlignmentFlag.AlignCenter, str(track.cell))
 
 
 def animate_geometry(widget: QWidget, rect: QRect) -> None:

@@ -139,6 +139,7 @@ def diagnostics_report(store: ConfigStore) -> str:
         f"cache:  {store.cache_dir}",
         f"state:  {store.state_dir}",
         f"mpv:    {find_executable('mpv') or 'missing'}",
+        f"libmpv: {ctypes.util.find_library('mpv') or 'missing'}",
         f"streamlink: {find_executable('streamlink') or 'missing'}",
         f"yt-dlp:     {find_executable('yt-dlp') or 'missing'}",
         f"xcb-cursor: {ctypes.util.find_library('xcb-cursor') or 'missing'}",

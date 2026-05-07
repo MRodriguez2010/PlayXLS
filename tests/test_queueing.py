@@ -1,5 +1,5 @@
 from playxls.models import VideoItem
-from playxls.queueing import next_video_for_repeat
+from playxls.queueing import adjacent_video, next_video_for_repeat
 
 
 def test_repeat_all_advances_and_wraps_in_library_order():
@@ -48,3 +48,15 @@ def test_no_auto_advance_without_repeat_scope_or_distinct_candidate():
     assert next_video_for_repeat(videos[0], videos, repeat_mode="none", shuffle=False) is None
     assert next_video_for_repeat(videos[0], videos, repeat_mode="one", shuffle=False) is None
     assert next_video_for_repeat(videos[0], videos, repeat_mode="all", shuffle=False) is None
+
+
+def test_adjacent_video_moves_forward_and_backward_with_wrap():
+    videos = [
+        VideoItem(id="v1", title="One", folder="A"),
+        VideoItem(id="v2", title="Two", folder="A"),
+        VideoItem(id="v3", title="Three", folder="A"),
+    ]
+
+    assert adjacent_video(videos[0], videos, direction=1) == videos[1]
+    assert adjacent_video(videos[0], videos, direction=-1) == videos[2]
+    assert adjacent_video(videos[2], videos, direction=1) == videos[0]

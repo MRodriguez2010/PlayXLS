@@ -53,10 +53,13 @@ If a watched folder or NAS path is causing startup trouble, launch once without 
 - mpv subprocess adapter for local video cells when `mpv` is installed.
 - GUI-free `--probe-video` command to test whether mpv can decode a local file or URL before debugging embedded playback.
 - Embedded mpv cells launch with mpv OSC/OSD/default bindings disabled so local-video controls stay in the app-level transport and do not interfere with hover expansion.
+- Embedded mpv cells launch with cache/readahead, safe hardware decode, and faster downscale filters to reduce HD/NAS playback pressure in small cells.
+- Optional local-video audio normalization is available in Playback settings.
 - mpv subprocess shutdown escalates from quit to terminate to kill so failed local-video loads cannot leave stuck child processes behind.
 - Local-video load failures now surface mpv diagnostics in the cell and toast instead of failing silently.
 - Local-video load failures are also appended to `~/.local/state/playxls/playback-diagnostics.jsonl` for post-run debugging.
 - Diagnostics can be exported from the CLI before GUI startup; cache indexes and browser profile data are intentionally excluded.
+- `playxls --diagnose` and the in-app Diagnostics dialog report `libmpv` availability and tail the playback diagnostics log.
 - QtWebEngine browser cells when the PySide6 WebEngine wheel is present.
 - Shared QtWebEngine browser profile by default with one reused `QWebEngineProfile` and persistent storage/cache under `~/.cache/playxls/browser/shared/`.
 - Advanced setting to switch browser cells between shared login/cookie storage and isolated per-cell profiles under `~/.cache/playxls/browser/cell-N/`.
@@ -66,11 +69,12 @@ If a watched folder or NAS path is causing startup trouble, launch once without 
 - Browser toolbar handoff to open the active browser cell URL in the system browser for sites that block embedded playback or login.
 - Browser load failures from QtWebEngine are surfaced in the app-level toolbar with Qt error details when available and the system-browser handoff still available.
 - Compact fixed-height browser cell toolbar for small cells.
-- Live bottom transport for the active video cell, including mpv-backed position, duration, play/pause state, and seek slider.
-- App-level repeat and shuffle transport controls with persisted state; `repeat 1` toggles mpv single-file looping, while `repeat all`, `repeat folder`, and shuffle auto-advance finished local videos.
+- Browser cells follow app mute/unmute and try to set standard page media element volume through JavaScript when the site allows it.
+- Live bottom transport for local video cells, including previous, play/pause, stop, next, mpv-backed timing, and a unified timeline that draws one numbered playhead per local-video cell against the longest active duration.
+- App-level symbolic repeat and shuffle transport controls with persisted state; `repeat 1` toggles mpv single-file looping, while `repeat all`, `repeat folder`, and shuffle auto-advance finished local videos.
 - Playback position persistence/resume when the setting is enabled.
 - Pause-on-minimize with resume only when playback was active before minimize.
-- Hover expand, hover-volume calculations, border modes, and cell-confined fullscreen.
+- Hover expand, hover-volume calculations, border modes, and cell-confined fullscreen. Hover enter/leave repositioning avoids native-window geometry animation to reduce flicker with embedded local/browser video surfaces.
 - Settings dialog with the five required sections and autosave.
 - Shortcut recording from the Settings dialog with TOML persistence.
 - QtWebEngine page fullscreen requests are accepted without expanding beyond the current browser cell.
@@ -88,7 +92,7 @@ python -m compileall playxls
 
 ## Native Dependency Notes
 
-This machine currently has `/snap/bin/mpv` but does not expose GTK4/libmpv development headers. The app therefore uses an mpv subprocess embedding adapter for the first runnable native slice. That adapter embeds with mpv's X11-style `--wid`, so PlayXLS prefers Qt's `xcb` backend when it is available, including on Wayland desktops with XWayland. See `MIGRATION_FROM_PROTOTYPE.md` for remaining native gaps and the migration path to libmpv/WebKitGTK/Flatpak.
+This machine currently has `/snap/bin/mpv` but does not expose GTK4/libmpv development headers or a loadable `libmpv`. The app therefore uses an mpv subprocess embedding adapter for the first runnable native slice. That adapter embeds with mpv's X11-style `--wid`, so PlayXLS prefers Qt's `xcb` backend when it is available, including on Wayland desktops with XWayland. See `MIGRATION_FROM_PROTOTYPE.md` for remaining native gaps and the migration path to libmpv/WebKitGTK/Flatpak.
 
 Development is currently Ubuntu-first. The finished app should also be usable on macOS and Windows, so platform-specific integration should stay isolated behind adapters. Packaging is intentionally the final build phase after backend, browser, and performance behavior are settled.
 

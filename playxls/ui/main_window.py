@@ -26,13 +26,13 @@ from playxls.folders import DEFAULT_SCAN_INTERVAL_SECONDS, FolderScanner, scan_f
 from playxls.keybindings import KeyBindingRegistry, normalize_combo
 from playxls.layout import LayoutDefinition, count_cells, preset_layouts
 from playxls.models import VIDEO_EXTENSIONS, AppState, BrowserPreset, CellContent, FolderEntry, VideoItem
-from playxls.queueing import next_video_for_repeat
+from playxls.queueing import adjacent_video, next_video_for_repeat
 from playxls.theme import Theme, app_stylesheet, resolve_theme
 from playxls.transport import TransportSnapshot
-from playxls.ui.dialogs import GridEditorDialog, SettingsDialog
+from playxls.ui.dialogs import DiagnosticsDialog, GridEditorDialog, SettingsDialog
 from playxls.ui.grid import GridStage
 from playxls.ui.panels import SourcesPanel
-from playxls.ui.widgets import LayoutThumbnailWidget, MonoLabel, ToastHost, make_section_label
+from playxls.ui.widgets import LayoutThumbnailWidget, MonoLabel, MultiHeadTimeline, TimelineTrack, ToastHost, make_section_label
 
 
 DEFAULT_MAIN_SPLITTER_SIZES = [320, 960]
@@ -58,7 +58,6 @@ class MainWindow(QMainWindow):
         self.active_browser_cell: int | None = None
         self.browser_load_failures: dict[int, str] = {}
         self._auto_advance_eof_keys: set[tuple[int, str]] = set()
-        self.seek_user_active = False
         self.resume_after_minimize = False
         self.border_visible = state.settings.border_mode == "always"
         self.border_timer = QTimer(self)
@@ -242,6 +241,10 @@ class MainWindow(QMainWindow):
         self.hover_button.clicked.connect(self._hover_menu)
         layout.addWidget(self.hover_button)
         layout.addStretch(1)
+        diagnostics = QPushButton("ⓘ")
+        diagnostics.setToolTip("Diagnostics")
+        diagnostics.clicked.connect(self._open_diagnostics)
+        layout.addWidget(diagnostics)
         settings = QPushButton("⚙")
         settings.setToolTip("Settings (Ctrl+,)")
         settings.clicked.connect(self._open_settings)
@@ -291,11 +294,26 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(transport)
         layout.setContentsMargins(16, 0, 16, 0)
         layout.setSpacing(12)
+        self.previous_button = QPushButton("⏮")
+        self.previous_button.setToolTip("Previous video")
+        self.previous_button.setFixedSize(32, 32)
+        self.previous_button.clicked.connect(lambda: self._skip_video(-1))
+        layout.addWidget(self.previous_button)
         self.play_button = QPushButton("Ⅱ")
         self.play_button.setFixedSize(36, 36)
         self.play_button.setStyleSheet(f"border-radius:18px;background:{self.theme.text_primary};color:{self.theme.bg};")
         self.play_button.clicked.connect(self._toggle_play)
         layout.addWidget(self.play_button)
+        self.stop_button = QPushButton("■")
+        self.stop_button.setToolTip("Stop active video")
+        self.stop_button.setFixedSize(32, 32)
+        self.stop_button.clicked.connect(self._stop_video)
+        layout.addWidget(self.stop_button)
+        self.next_button = QPushButton("⏭")
+        self.next_button.setToolTip("Next video")
+        self.next_button.setFixedSize(32, 32)
+        self.next_button.clicked.connect(lambda: self._skip_video(1))
+        layout.addWidget(self.next_button)
         self.mute_button = QPushButton("🔊")
         self.mute_button.clicked.connect(self._toggle_mute)
         layout.addWidget(self.mute_button)
@@ -306,25 +324,21 @@ class MainWindow(QMainWindow):
         self.volume.valueChanged.connect(self._set_master_volume)
         layout.addWidget(self.volume)
         self.repeat_button = QPushButton("")
-        self.repeat_button.setFixedWidth(86)
+        self.repeat_button.setFixedWidth(42)
         self.repeat_button.setToolTip("Repeat mode")
         self.repeat_button.clicked.connect(self._cycle_repeat_mode)
         layout.addWidget(self.repeat_button)
         self.shuffle_button = QPushButton("")
-        self.shuffle_button.setFixedWidth(86)
+        self.shuffle_button.setFixedWidth(42)
         self.shuffle_button.setToolTip("Shuffle")
         self.shuffle_button.clicked.connect(self._toggle_shuffle)
         layout.addWidget(self.shuffle_button)
         self.time_left = MonoLabel("--:--")
         self.time_right = MonoLabel("--:--")
         layout.addWidget(self.time_left)
-        self.seek = QSlider(Qt.Orientation.Horizontal)
-        self.seek.setRange(0, 1000)
-        self.seek.setValue(0)
-        self.seek.setEnabled(False)
-        self.seek.sliderPressed.connect(self._seek_started)
-        self.seek.sliderReleased.connect(self._seek_released)
-        layout.addWidget(self.seek, 1)
+        self.timeline = MultiHeadTimeline(self.theme)
+        self.timeline.seek_requested.connect(self._timeline_seek_requested)
+        layout.addWidget(self.timeline, 1)
         layout.addWidget(self.time_right)
         sync = MonoLabel("● SYNCED")
         sync.setStyleSheet(f'font-family:"JetBrains Mono";font-size:10px;color:{self.theme.danger};background:transparent;')
@@ -353,7 +367,7 @@ class MainWindow(QMainWindow):
         self.play_button.setText("Ⅱ" if self.state.playing else "▶")
         self.mute_button.setText("🔇" if self.state.muted else "🔊")
         self.repeat_button.setText(self._repeat_button_label())
-        self.shuffle_button.setText("shuffle on" if self.state.shuffle else "shuffle off")
+        self.shuffle_button.setText("⤨" if self.state.shuffle else "⇄")
         self.sources.set_data(
             self.state.library_videos,
             self.state.folders,
@@ -461,7 +475,7 @@ class MainWindow(QMainWindow):
         self.state.repeat_mode = modes[(index + 1) % len(modes)]
         self._apply_repeat_mode_to_cells()
         self._save_session()
-        self._toast(self._repeat_button_label())
+        self._toast(f"Repeat: {self._repeat_toast_label()}")
         self._sync_ui()
 
     def _toggle_shuffle(self) -> None:
@@ -472,11 +486,54 @@ class MainWindow(QMainWindow):
 
     def _repeat_button_label(self) -> str:
         return {
-            "none": "repeat off",
-            "one": "repeat 1",
-            "all": "repeat all",
-            "folder": "repeat folder",
-        }.get(self.state.repeat_mode, "repeat off")
+            "none": "↻",
+            "one": "↻1",
+            "all": "↻∞",
+            "folder": "↻F",
+        }.get(self.state.repeat_mode, "↻")
+
+    def _repeat_toast_label(self) -> str:
+        return {
+            "none": "off",
+            "one": "one",
+            "all": "all",
+            "folder": "folder",
+        }.get(self.state.repeat_mode, "off")
+
+    def _skip_video(self, direction: int) -> None:
+        cell = self._transport_cell()
+        if not cell:
+            return
+        index = int(getattr(cell, "index", -1))
+        video = getattr(cell, "video", None)
+        if index < 0 or not video:
+            return
+        next_video = adjacent_video(video, self.state.library_videos, direction=direction)
+        if not next_video:
+            return
+        self.state.ensure_cell_capacity(index + 1)
+        self.state.cell_content[index] = CellContent.video(next_video.id)
+        self.state.playing = True
+        self._save_session()
+        action = "Next" if direction >= 0 else "Previous"
+        self._toast(f"{action}: {next_video.title} → Cell {index + 1}")
+        self._sync_ui()
+
+    def _stop_video(self) -> None:
+        cell = self._transport_cell()
+        mpv = getattr(cell, "mpv", None) if cell else None
+        if not mpv:
+            return
+        if hasattr(mpv, "seek_absolute"):
+            mpv.seek_absolute(0)
+        if hasattr(mpv, "set_pause"):
+            mpv.set_pause(True)
+        self.state.playing = False
+        self.play_button.setText("▶")
+        self._refresh_transport()
+        self.state.playing = False
+        self.play_button.setText("▶")
+        self._toast("Stopped")
 
     def _apply_repeat_mode_to_cells(self) -> None:
         loop_current_file = self.state.repeat_mode == "one"
@@ -531,6 +588,7 @@ class MainWindow(QMainWindow):
         return None
 
     def _refresh_transport(self) -> None:
+        self.timeline.set_tracks(self._timeline_tracks())
         cell = self._transport_cell()
         mpv = getattr(cell, "mpv", None) if cell else None
         if not mpv:
@@ -573,20 +631,23 @@ class MainWindow(QMainWindow):
     def _set_transport_snapshot(self, snapshot: TransportSnapshot, *, enabled: bool) -> None:
         self.time_left.setText(snapshot.position_text)
         self.time_right.setText(snapshot.duration_text)
-        self.seek.setEnabled(enabled and bool(snapshot.duration))
-        if not self.seek_user_active:
-            self.seek.blockSignals(True)
-            self.seek.setValue(int(snapshot.progress_percent * 10))
-            self.seek.blockSignals(False)
         if enabled:
             self.state.playing = not snapshot.paused
             self.play_button.setText("Ⅱ" if self.state.playing else "▶")
 
-    def _seek_started(self) -> None:
-        self.seek_user_active = True
+    def _timeline_tracks(self) -> list[TimelineTrack]:
+        tracks: list[TimelineTrack] = []
+        for cell in self.grid.cells:
+            content = getattr(cell, "content", None)
+            mpv = getattr(cell, "mpv", None)
+            if getattr(content, "kind", "") != "video" or not mpv or not hasattr(mpv, "transport_snapshot"):
+                continue
+            snapshot = mpv.transport_snapshot()
+            if snapshot.duration:
+                tracks.append(TimelineTrack(int(getattr(cell, "index", 0)) + 1, snapshot.position or 0.0, snapshot.duration))
+        return tracks
 
-    def _seek_released(self) -> None:
-        self.seek_user_active = False
+    def _timeline_seek_requested(self, ratio: float) -> None:
         cell = self._transport_cell()
         mpv = getattr(cell, "mpv", None) if cell else None
         if not mpv:
@@ -594,7 +655,8 @@ class MainWindow(QMainWindow):
         snapshot = mpv.transport_snapshot()
         if not snapshot.duration:
             return
-        mpv.seek_absolute(snapshot.duration * (self.seek.value() / 1000))
+        timeline_duration = self.timeline.duration or snapshot.duration
+        mpv.seek_absolute(min(snapshot.duration, timeline_duration * max(0.0, min(1.0, ratio))))
         self._refresh_transport()
 
     def _assign_video(self, video_id: str, index: int) -> None:
@@ -778,6 +840,27 @@ class MainWindow(QMainWindow):
         dialog.bindings_changed.connect(self._bindings_changed)
         dialog.exec()
         self._sync_ui()
+
+    def _open_diagnostics(self) -> None:
+        dialog = DiagnosticsDialog(self.theme, self._diagnostics_text(), self)
+        dialog.exec()
+
+    def _diagnostics_text(self) -> str:
+        from playxls.app import diagnostics_report
+
+        sections = [diagnostics_report(self.store).rstrip()]
+        path = self.store.playback_diagnostics_path
+        if not path.exists():
+            sections.append(f"Playback diagnostics tail:\n{path}\n(no records)")
+            return "\n\n".join(sections) + "\n"
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()[-40:]
+        except OSError as exc:
+            sections.append(f"Playback diagnostics tail:\n{path}\nread failed: {exc}")
+            return "\n\n".join(sections) + "\n"
+        body = "\n".join(lines) if lines else "(no records)"
+        sections.append(f"Playback diagnostics tail:\n{path}\n{body}")
+        return "\n\n".join(sections) + "\n"
 
     def _open_grid_editor(self) -> None:
         dialog = GridEditorDialog(self.theme, self._current_layout(), self)
@@ -1055,6 +1138,7 @@ class MainWindow(QMainWindow):
         self.play_button.setStyleSheet(f"border-radius:18px;background:{self.theme.text_primary};color:{self.theme.bg};")
         self.sources.set_theme(self.theme)
         self.grid.set_theme(self.theme)
+        self.timeline.set_theme(self.theme)
         self.browser_toolbar.setStyleSheet(f"background:{self.theme.surface1};border-bottom:1px solid {self.theme.border};")
         self.browser_cell_label.setStyleSheet(f'font-family:"JetBrains Mono";font-size:11px;color:{self.theme.text_muted};background:transparent;')
         self.browser_notice.setStyleSheet(f'font-family:"JetBrains Mono";font-size:10px;color:{self.theme.danger};background:transparent;')

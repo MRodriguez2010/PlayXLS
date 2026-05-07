@@ -78,7 +78,7 @@ class FakeMpv:
         self.volumes: list[float] = []
         self.stopped = False
 
-    def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60) -> bool:
+    def load(self, source: str, *, paused: bool = False, loop: bool = False, volume: int = 60, audio_normalize: bool = False) -> bool:
         self.loaded = (source, paused, loop, volume)
         self.paused = paused
         self.volumes.append(volume)

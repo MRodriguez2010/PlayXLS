@@ -13,7 +13,21 @@ cd /home/ai-agents/Projects/PlayXLS
 .venv/bin/playxls
 ```
 
-The latest slice added preview/library performance certification, persisted Sources/stage splitter sizing, custom-layout delete affordances, browser source-list compatibility notices, richer QtWebEngine load-failure messages, cached watched-folder startup loading, the large-NAS startup fix, the XCB launch preference for embedded mpv playback, Pluto playback-limited warnings, repeat/shuffle auto-advance for finished local videos, visible mpv load-failure diagnostics for local video cells, a recovery safe-mode launch path for bypassing watched folders, and watched-folder scan failure logging.
+The latest slice added preview/library performance certification, persisted Sources/stage splitter sizing, custom-layout delete affordances, browser source-list compatibility notices, richer QtWebEngine load-failure messages, cached watched-folder startup loading, the large-NAS startup fix, the XCB launch preference for embedded mpv playback, Pluto playback-limited warnings, repeat/shuffle auto-advance for finished local videos, visible mpv load-failure diagnostics for local video cells, a recovery safe-mode launch path for bypassing watched folders, watched-folder scan failure logging, symbolic transport controls, unified local-video timeline heads, HD/NAS playback tuning, optional audio normalization, browser volume best-effort control, and an in-app Diagnostics dialog.
+
+## Latest Transport And Playback Tuning
+
+The bottom transport now has previous, play/pause, stop, next, mute, volume, symbolic repeat, and symbolic shuffle controls. Previous/next assign the adjacent library video into the active local-video cell with wraparound. Stop seeks the active local-video cell to `0` and pauses it. Repeat labels are now compact symbols (`↻`, `↻1`, `↻∞`, `↻F`) and shuffle uses symbolic off/on labels.
+
+The former single seek slider is now a unified local-video timeline. It computes the longest active local-video duration and draws one numbered playhead per local-video cell against that shared time base. Browser videos are excluded because QtWebEngine does not expose reliable per-site playback timing through a shared API. Clicking the timeline seeks the active local-video cell to the corresponding shared-time position, clamped to that cell's duration.
+
+Embedded mpv launches now include cache/readahead, `hwdec=auto-safe`, and faster scaling/downscaling options so HD/NAS files are less costly when rendered into small grid cells. Playback settings now include `Normalize local-video audio`, which enables mpv's `dynaudnorm` filter when selected. Hover enter/leave repositioning no longer animates native embedded video/browser window geometry, reducing flicker from expanded cells.
+
+Browser cells now respond to app mute/unmute through QtWebEngine's page mute API and also run a small JavaScript hook to set standard `video`/`audio` element volume when the site permits it. Sites that isolate media in cross-origin frames or custom players may still ignore proportional volume changes.
+
+The app toolbar now includes an in-app Diagnostics button. It shows the same dependency report as `playxls --diagnose`, including `libmpv`, and tails `~/.local/state/playxls/playback-diagnostics.jsonl`.
+
+Direct libmpv migration is not complete on this machine. `ctypes.util.find_library("mpv")` currently returns missing, so the active backend remains the subprocess mpv adapter until a loadable system `libmpv` and Python binding path are installed.
 
 ## Latest Folder Scan Diagnostics
 
@@ -171,6 +185,7 @@ Latest full verification:
 
 ```bash
 QT_QPA_PLATFORM=offscreen QTWEBENGINE_DISABLE_SANDBOX=1 PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest -q tests/test_video.py tests/test_playback_state.py tests/test_browser_cell.py tests/test_main_window_transport.py
+QT_QPA_PLATFORM=offscreen QTWEBENGINE_DISABLE_SANDBOX=1 PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest -q tests/test_main_window_transport.py tests/test_browser_cell.py tests/test_video.py tests/test_queueing.py tests/test_models.py tests/test_config.py tests/test_preview.py tests/test_playback_state.py tests/test_settings_dialog.py
 QT_QPA_PLATFORM=offscreen QTWEBENGINE_DISABLE_SANDBOX=1 PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest -q -p no:cacheprovider
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - <<'PY'
 from pathlib import Path
@@ -184,6 +199,7 @@ PY
 
 Results:
 
+- Focused transport/browser/playback/settings tests after transport and playback tuning: `90 passed in 3.49s`
 - Focused diagnostics/playback/browser transport tests: `53 passed in 2.72s`
 - Focused config/playback/video/main-window transport tests after adding persistent playback diagnostics: `50 passed in 2.59s`
 - Focused video/playback/main-window transport tests after adding mpv shutdown escalation: `42 passed in 2.50s`
@@ -191,9 +207,9 @@ Results:
 - Focused app/video playback-probe tests: `19 passed in 0.22s`
 - Focused startup/app safe-mode tests: `13 passed in 0.21s`
 - Focused folder/main-window scan failure diagnostics tests: `29 passed in 2.51s`
-- Full suite: `130 passed in 4.78s`
+- Full suite: `140 passed in 5.24s`
 - `compiled 22 Python source files`
-- Diagnostics found `/snap/bin/mpv`, PySide6, QtWebEngine, `libxcb-cursor.so.0`, and now selects Qt platform `xcb`.
+- Diagnostics found `/snap/bin/mpv`, PySide6, QtWebEngine, `libxcb-cursor.so.0`, `libmpv: missing`, and now selects Qt platform `xcb`.
 - Diagnostics export smoke wrote `/tmp/playxls-diagnostics-smoke.zip` with `diagnose.txt` and `manifest.json`; the watched-library cache index was excluded.
 - Playback probe smoke against a harmless missing file returned exit status `1` and surfaced mpv's missing-file diagnostic.
 - Safe-mode startup smoke against the active config launched with `folders=0`, `videos=0`, and no folder scanner.

@@ -8,9 +8,10 @@ from pathlib import Path
 from PySide6.QtWebEngineCore import QWebEngineLoadingInfo
 from PySide6.QtWidgets import QApplication
 
+from playxls.layout import LayoutDefinition, LayoutNode
 from playxls.models import AppSettings, CellContent
 from playxls.theme import THEMES
-from playxls.ui.grid import CellWidget
+from playxls.ui.grid import CellWidget, GridStage
 
 
 def test_browser_cell_uses_shared_profile_paths_by_default(tmp_path: Path):
@@ -201,6 +202,35 @@ def test_browser_cell_resets_loading_error_state_when_content_changes(tmp_path: 
     cell._clear_body()
 
 
+def test_browser_cell_volume_mutes_and_unmutes_web_audio(tmp_path: Path):
+    app = QApplication.instance() or QApplication([])
+    cell = CellWidget(1, THEMES["dark"], tmp_path)
+    page = _FakeAudioPage()
+    cell.browser_page = page
+
+    cell.set_volume(0)
+    cell.set_volume(0.5)
+
+    assert page.muted == [True, False]
+    assert "const volume = 0.0000" in page.scripts[0]
+    assert "const volume = 0.5000" in page.scripts[1]
+    assert "querySelectorAll('video,audio')" in page.scripts[1]
+
+
+def test_hover_reposition_does_not_animate_native_video_cells(tmp_path: Path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    stage = GridStage(THEMES["dark"], tmp_path)
+    stage.layout_def = LayoutDefinition("two", "Two", LayoutNode.split("v", 0.5, LayoutNode.leaf(), LayoutNode.leaf()))
+    stage.cells = [_PositionCell(), _PositionCell()]
+    animated = []
+    monkeypatch.setattr("playxls.ui.grid.animate_geometry", lambda widget, rect: animated.append((widget, rect)))
+    stage.resize(800, 400)
+
+    stage._set_hovered(0)
+
+    assert animated == []
+
+
 class FakeLoadingInfo:
     def __init__(self, error: str, code: int, url: str) -> None:
         self._error = error
@@ -228,3 +258,35 @@ class _FakeUrl:
 
     def toString(self) -> str:
         return self.value
+
+
+class _FakeAudioPage:
+    def __init__(self) -> None:
+        self.muted = []
+        self.scripts = []
+
+    def setAudioMuted(self, muted: bool) -> None:
+        self.muted.append(muted)
+
+    def runJavaScript(self, script: str) -> None:
+        self.scripts.append(script)
+
+
+class _PositionCell:
+    def __init__(self) -> None:
+        self.raised = False
+        self.geometry = None
+        self.dimmed = False
+        self.hovered = False
+
+    def setGeometry(self, rect) -> None:
+        self.geometry = rect
+
+    def raise_(self) -> None:
+        self.raised = True
+
+    def set_dimmed(self, dimmed: bool) -> None:
+        self.dimmed = dimmed
+
+    def set_hovered(self, hovered: bool) -> None:
+        self.hovered = hovered

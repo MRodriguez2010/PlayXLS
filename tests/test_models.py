@@ -1,4 +1,11 @@
-from playxls.models import AppState, CellContent, SessionState
+from playxls.models import AppSettings, AppState, CellContent, SessionState
+
+
+def test_settings_round_trip_preserves_audio_normalize():
+    settings = AppSettings.from_dict({"audio_normalize": True})
+
+    assert settings.audio_normalize is True
+    assert settings.to_dict()["audio_normalize"] is True
 
 
 def test_app_state_applies_saved_session_and_preserves_capacity():

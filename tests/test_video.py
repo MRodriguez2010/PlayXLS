@@ -71,6 +71,39 @@ def test_embedded_mpv_args_keep_loader_output_available_for_diagnostics(tmp_path
     assert "--msg-level=all=warn" in args
 
 
+def test_embedded_mpv_args_enable_cache_fast_scaling_and_safe_hwdecode(tmp_path: Path):
+    args = video_module.build_mpv_args(
+        "mpv",
+        "movie.mp4",
+        ipc_path=tmp_path / "mpv.sock",
+        window_id=123,
+        paused=False,
+        loop=False,
+        volume=60,
+    )
+
+    assert "--cache=yes" in args
+    assert "--demuxer-readahead-secs=20" in args
+    assert "--hwdec=auto-safe" in args
+    assert "--scale=bilinear" in args
+    assert "--dscale=bilinear" in args
+
+
+def test_embedded_mpv_args_can_enable_audio_normalization(tmp_path: Path):
+    args = video_module.build_mpv_args(
+        "mpv",
+        "movie.mp4",
+        ipc_path=tmp_path / "mpv.sock",
+        window_id=123,
+        paused=False,
+        loop=False,
+        volume=60,
+        audio_normalize=True,
+    )
+
+    assert any(arg.startswith("--af=lavfi=") and "dynaudnorm" in arg for arg in args)
+
+
 def test_mpv_controller_captures_output_when_load_exits_before_ipc(monkeypatch, tmp_path: Path):
     popen_calls = []
 

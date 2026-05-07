@@ -4,7 +4,7 @@ The React prototype in `Initial_Demo/playxls_demo.jsx` is the visual and behavio
 
 ## Intentional Divergences In This Build
 
-- **Video backend:** The prompt asks for libmpv. The local machine lacks libmpv development headers, so this build uses an embedded `mpv` subprocess with JSON IPC. The app code treats this as an adapter so it can be replaced by libmpv without rewriting UI state.
+- **Video backend:** The prompt asks for libmpv. The local machine lacks a loadable `libmpv` and libmpv development headers, so this build uses an embedded `mpv` subprocess with JSON IPC. `playxls --diagnose` and the in-app Diagnostics dialog now report `libmpv` availability explicitly. The app code treats the subprocess backend as an adapter so it can be replaced by libmpv without rewriting UI state.
 - **Snap mpv IPC:** When `/snap/bin/mpv` is used, PlayXLS puts the JSON IPC socket under `~/PlayXLS Runtime/mpv-ipc` because Snap mpv cannot bind sockets in hidden home directories such as `~/.cache`.
 - **Browser cells:** The prompt prefers WebKitGTK for GTK or QtWebEngine for Qt. This build uses QtWebEngine when the optional PySide6 WebEngine module is installed and shows a native placeholder otherwise. Page fullscreen requests are accepted and kept inside the current browser cell; they do not trigger PlayXLS stage fullscreen. Browser cells use persistent profile paths. This still needs site-by-site validation against services with custom video players and DRM requirements.
 - **Browser profile scope:** Browser storage now defaults to one reused PlayXLS QtWebEngine profile so logins/cookies can work across browser cells without multiple Chromium profile objects contending for the same disk cache. The Advanced settings page keeps an isolated per-cell profile option for users who want cell-local sessions.
@@ -32,7 +32,7 @@ Development is happening on Ubuntu Linux first, with Ubuntu as the first validat
 
 ## Next Native Milestones
 
-1. Replace `playxls.video.MpvController` with direct libmpv bindings once headers are available.
+1. Install/verify a loadable system `libmpv` plus Python binding strategy, then replace `playxls.video.MpvController` with direct libmpv bindings.
 2. Validate and harden browser profile sharing, fullscreen, and cookie/session behavior against YouTube/Twitch/Netflix-style players.
 3. Add splitter drag handles to the grid editor and the live stage.
 4. Certify performance and memory behavior under sustained multi-video use, including preview hovers.
