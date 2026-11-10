@@ -7,7 +7,7 @@ Updated: 2026-05-07
 PlayXLS is a Python 3.12 + PySide6/Qt 6 native desktop app. It runs from the project virtualenv:
 
 ```bash
-cd /home/ai-agents/Projects/PlayXLS
+cd ~/Projects/PlayXLS
 .venv/bin/playxls --diagnose
 .venv/bin/playxls --safe-mode
 .venv/bin/playxls
